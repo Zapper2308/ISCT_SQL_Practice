@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load sqlpractice_tags %}
+{% block title %}Q{{ q.number }} · {{ topic.title }}{% endblock %}
+{% block body_class %}workspace-page{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
+<style>
+  .CodeMirror-cursor,
+  .editor-wrap .CodeMirror-cursor,
+  .CodeMirror-secondarycursor {
+    border-left: 2px solid #ffffff !important;
+    border-left-color: #ffffff !important;
+  }
+  .editor-wrap .CodeMirror textarea,
+  .editor-wrap textarea#editor {
+    caret-color: #ffffff !important;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<main class="workspace">
+  <section class="q-bar">
+    <div class="q-bar-top">
+      <nav class="crumbs">
+        <a href="{% url 'practice' q.difficulty %}" class="diff-pill diff-{{ q.difficulty }} sm">{{ difficulty_label }}</a>
+        <span>›</span>
+        <a href="{% url 'practice' q.difficulty %}?topic={{ topic.slug|urlencode }}">{{ topic.title }}</a>
+        <span>›</span>
+        <a href="{% url 'practice' q.difficulty %}?topic={{ topic.slug|urlencode }}&amp;section={{ section.letter|urlencode }}">Section {{ section.letter }}: {{ section.title }}</a>
+      </nav>
+      <div class="q-nav">
+        <span id="status-badge" class="status-badge {{ status }}">{% if status == 'solved' %}✓ Solved{% elif status == 'attempted' %}In progress{% else %}New{% endif %}</span>
+        <a class="btn btn-ghost btn-sm {% if not prev_q %}disabled{% endif %}" {% if prev_q %}href="{% url 'question' prev_q.id %}"{% endif %} title="Previous question">‹ Prev</a>
+        <a class="btn btn-ghost btn-sm {% if not next_q %}disabled{% endif %}" {% if next_q %}href="{% url 'question' next_q.id %}"{% endif %} title="Next question">Next ›</a>
+      </div>
+    </div>
+    <h1 class="q-title"><span class="q-num">Q{{ q.number }}</span> {{ q.text }}
+      <span class="tag {% if q.is_sql %}tag-sql{% else %}tag-concept{% endif %}">{% if q.is_sql %}SQL{% else %}Concept{% endif %}</span></h1>
+  </section>
+
+  <div class="ws-body">
+    <aside class="schema-panel" id="schema-panel" hidden>
+      <div class="schema-head">
+        <strong>Schema</strong>
+        <input type="search" id="schema-filter" placeholder="Filter tables…">
+      </div>
+      <div class="schema-tree" id="schema-tree"><p class="muted small pad">Loading…</p></div>
+    </aside>
+
+    <div class="split" id="split">
+      <section class="pane editor-pane" id="editor-pane">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="run-btn" title="Run (Ctrl+Enter)"><span class="play">▶</span> Run <kbd>Ctrl ↵</kbd></button>
+          <button class="btn btn-ghost" id="schema-btn" title="Show tables and columns">Schema</button>
+          <span class="toolbar-spacer"></span>
+          <span class="save-state muted small" id="save-state"></span>
+          {% if can_reveal %}<button class="btn btn-ghost" id="answer-btn">Show answer</button>{% endif %}
+          <button class="btn btn-success" id="submit-btn" title="Check your answer and mark the question solved if it's correct">
+            {% if status == 'solved' %}Submit again{% else %}Submit{% endif %}
+          </button>
+        </div>
+        <div class="editor-wrap"><textarea id="editor"></textarea></div>
+      </section>
+
+      <div class="splitter" id="splitter" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
+
+      <section class="pane result-pane" id="result-pane">
+        <div class="result-tabs">
+          <button class="rtab active" data-tab="result">Result</button>
+          <button class="rtab" data-tab="messages">Messages <span class="count" id="msg-count"></span></button>
+          {% if can_reveal %}<button class="rtab" data-tab="answer" id="answer-tab" hidden>Answer key</button>{% endif %}
+          <span class="toolbar-spacer"></span>
+          <span class="run-meta muted small" id="run-meta"></span>
+        </div>
+        <div class="verdict" id="verdict" hidden></div>
+        <div class="result-body">
+          <div class="rpanel" data-panel="result" id="result-panel">
+            <div class="placeholder">
+              {% if q.is_sql %}Write your query above and press <kbd>Ctrl ↵</kbd> to test it. When you're happy with it, click <b>Submit</b> - it's accepted only if it's correct.
+              {% else %}This is a conceptual question - write your answer in the editor (plain text is fine), then click <b>Submit</b> to have it checked.{% endif %}
+            </div>
+          </div>
+          <div class="rpanel" data-panel="messages" id="messages-panel" hidden></div>
+          <div class="rpanel" data-panel="answer" id="answer-panel" hidden></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+{% if can_reveal %}
+<div class="modal-backdrop" id="reveal-modal" hidden>
+  <form class="modal" id="reveal-form" autocomplete="off">
+    <h2>Show the answer?</h2>
+    <p class="muted">Try solving it yourself first. To confirm, solve this:</p>
+    <label class="challenge">
+      <span id="challenge-text"></span>
+      <input type="text" inputmode="numeric" id="challenge-input" required aria-label="Your answer">
+    </label>
+    <p class="challenge-error" id="challenge-error" hidden>That's not right - here's a new one.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="reveal-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary">Show answer</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+{{ page_data|json_script:"page-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/sql-hint.min.js"></script>
+<script src="{% asset 'js/question.js' %}"></script>
+{% endblock %}

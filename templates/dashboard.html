@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% load humanize sqlpractice_tags %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<main class="page wide">
+  <div class="page-head">
+    <div>
+      <h1>Hi {{ user.name|first_word }}, here's your progress</h1>
+    </div>
+  </div>
+
+  <section class="kpis">
+    <div class="kpi kpi-hero">
+      <div class="ring" style="--p: {{ stats.pct }}">
+        <span>{{ stats.pct }}%</span>
+      </div>
+      <div>
+        <div class="kpi-label">Solved</div>
+        <div class="kpi-value">{{ stats.solved }}<small> / {{ stats.total|intcomma }}</small></div>
+      </div>
+    </div>
+    <div class="kpi"><div class="kpi-label">Solved this week</div><div class="kpi-value">{{ stats.week }}</div></div>
+    <div class="kpi"><div class="kpi-label">In progress</div><div class="kpi-value">{{ stats.attempted }}</div><div class="kpi-sub">attempted, not solved</div></div>
+    <div class="kpi"><div class="kpi-label">Queries run</div><div class="kpi-value">{{ stats.runs }}</div></div>
+  </section>
+
+  <section class="diff-cards">
+    {% for s in diff_cards %}
+    <a class="diff-card diff-{{ s.key }}" href="{% url 'practice' s.key %}">
+      <div class="diff-card-top">
+        <span class="diff-pill diff-{{ s.key }}">{{ s.label }}</span>
+        <span class="diff-pct">{{ s.pct }}%</span>
+      </div>
+      <div class="diff-count"><strong>{{ s.solved }}</strong> / {{ s.total|intcomma }} solved</div>
+      <div class="bar"><span style="width: {{ s.pct }}%"></span></div>
+      <div class="kpi-sub">{{ s.attempted }} in progress</div>
+    </a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Progress by topic</h2><span class="muted small">solved / total per difficulty</span></div>
+    <div class="table-wrap">
+      <table class="matrix">
+        <thead>
+          <tr><th>Topic</th>{% for d, label in DIFFICULTY_CHOICES %}<th class="diff-text-{{ d }}">{{ label }}</th>{% endfor %}<th>Total</th></tr>
+        </thead>
+        <tbody>
+          {% for row in topic_rows %}
+          <tr>
+            <td class="topic-cell"><span class="topic-num">{{ row.topic.order|stringformat:"02d" }}</span>{{ row.topic.title }}</td>
+            {% for c in row.cells %}
+            <td>
+              <a class="cell-link" href="{% url 'practice' c.key %}?topic={{ row.topic.slug|urlencode }}">
+                <span class="cell-num {{ c.state }}">{{ c.solved }}/{{ c.total }}</span>
+                <span class="mini-bar diff-{{ c.key }}"><span style="width: {{ c.pct }}%"></span></span>
+              </a>
+            </td>
+            {% endfor %}
+            <td class="total-cell">{{ row.solved }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}

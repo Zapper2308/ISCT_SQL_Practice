@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ difficulty_label }} · {{ topic.title }}{% endblock %}
+{% block body_class %}practice-page{% endblock %}
+{% block content %}
+<div class="practice-shell">
+  <aside class="topic-panel" id="topic-panel" aria-label="Topics">
+    <div class="topic-panel-head">
+      <div class="topic-panel-title">
+        <span class="diff-pill diff-{{ difficulty }}">{{ difficulty_label }}</span>
+        <strong>Topics</strong>
+        <span class="muted small">{{ topic_tabs|length }}</span>
+        <button class="btn btn-ghost btn-sm topic-panel-close" id="topic-panel-close" aria-label="Close topics">✕</button>
+      </div>
+      <input type="search" class="search" id="topic-filter" placeholder="Filter topics…">
+    </div>
+    <nav class="topic-list" id="topic-list">
+      {% for t in topic_tabs %}
+      <a href="{% url 'practice' difficulty %}?topic={{ t.topic.slug|urlencode }}"
+         class="topic-item {% if t.topic.slug == topic.slug %}active{% endif %}"
+         data-name="{{ t.topic.title|lower }}">
+        <span class="topic-num">{{ t.topic.order|stringformat:"02d" }}</span>
+        <span class="topic-item-title">{{ t.topic.title }}</span>
+        <span class="topic-item-count {% if t.done %}done{% endif %}">{{ t.solved }}/{{ t.total }}</span>
+        <span class="mini-bar diff-{{ difficulty }}"><span style="width: {{ t.pct }}%"></span></span>
+      </a>
+      {% endfor %}
+    </nav>
+  </aside>
+  <div class="topic-panel-backdrop" id="topic-panel-backdrop"></div>
+
+  <main class="practice-main">
+    <div class="page-head">
+      <div>
+        <button class="btn btn-ghost btn-sm topic-panel-open" id="topic-panel-open">☰ Topics</button>
+        <span class="muted small">Topic {{ topic.order|stringformat:"02d" }}</span>
+        <h1>{{ topic.title }}</h1>
+      </div>
+    </div>
+
+    {% if section %}
+    <nav class="section-grid" aria-label="Sections">
+      {% for s in section_tabs %}
+      <a href="{% url 'practice' difficulty %}?topic={{ topic.slug|urlencode }}&amp;section={{ s.section.letter|urlencode }}"
+         class="section-btn {% if s.section.letter == section.letter %}active{% endif %}">
+        <span class="section-letter">{{ s.section.letter }}</span>
+        <span class="section-title">{{ s.section.title }}</span>
+        <span class="section-count">{{ s.solved }}/{{ s.total }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Section {{ section.letter }}: {{ section.title }}</h2>
+        <div class="filters" role="group" aria-label="Filter">
+          <button class="chip active" data-filter="all">All</button>
+          <button class="chip" data-filter="unsolved">Unsolved</button>
+          <button class="chip" data-filter="solved">Solved</button>
+        </div>
+      </div>
+      <ol class="q-list">
+        {% for item in questions %}{% with q=item.q st=item.status %}
+        <li data-status="{{ st }}">
+          <a href="{% url 'question' q.id %}">
+            <span class="q-num">Q{{ q.number }}</span>
+            <span class="q-text">{{ q.text }}</span>
+            <span class="q-meta">
+              <span class="tag {% if q.is_sql %}tag-sql{% else %}tag-concept{% endif %}">{% if q.is_sql %}SQL{% else %}Concept{% endif %}</span>
+              <span class="status-badge {{ st }}">{% if st == 'solved' %}✓ Solved{% elif st == 'attempted' %}In progress{% else %}New{% endif %}</span>
+            </span>
+          </a>
+        </li>
+        {% endwith %}{% endfor %}
+      </ol>
+      <p class="empty-filter muted" hidden>No questions match this filter.</p>
+    </section>
+    {% else %}
+    <div class="card empty"><p class="muted">No questions for this topic at this difficulty.</p></div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Centre the current topic inside the panel (only the panel scrolls, not the page).
+  const topicList = document.getElementById('topic-list');
+  const activeTopic = topicList.querySelector('.topic-item.active');
+  if (activeTopic) {
+    const offset = activeTopic.getBoundingClientRect().top - topicList.getBoundingClientRect().top;
+    topicList.scrollTop += offset - topicList.clientHeight / 2 + activeTopic.offsetHeight / 2;
+  }
+
+  document.getElementById('topic-filter').addEventListener('input', (e) => {
+    const f = e.target.value.trim().toLowerCase();
+    topicList.querySelectorAll('.topic-item').forEach(a => { a.hidden = f && !a.dataset.name.includes(f); });
+  });
+
+  // Small screens: the panel slides in as a drawer.
+  const setPanel = (open) => document.body.classList.toggle('topics-open', open);
+  document.getElementById('topic-panel-open').addEventListener('click', () => setPanel(true));
+  document.getElementById('topic-panel-close').addEventListener('click', () => setPanel(false));
+  document.getElementById('topic-panel-backdrop').addEventListener('click', () => setPanel(false));
+
+  const chips = document.querySelectorAll('.chip');
+  chips.forEach(chip => chip.addEventListener('click', () => {
+    chips.forEach(c => c.classList.toggle('active', c === chip));
+    const f = chip.dataset.filter;
+    let shown = 0;
+    document.querySelectorAll('.q-list li').forEach(li => {
+      const st = li.dataset.status;
+      const show = f === 'all' || (f === 'solved' ? st === 'solved' : st !== 'solved');
+      li.hidden = !show;
+      shown += show;
+    });
+    document.querySelector('.empty-filter').hidden = shown > 0;
+  }));
+</script>
+{% endblock %}

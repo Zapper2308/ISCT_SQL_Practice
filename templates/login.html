@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load sqlpractice_tags %}
+{% block title %}Log in · SQL QUERY PRACTICE{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block head %}
+<style>
+  .auth-app-title {
+    font-size: 56px !important;
+    font-weight: 800 !important;
+    color: var(--text) !important;
+    letter-spacing: -0.03em !important;
+    line-height: 1.15 !important;
+    margin: 0 0 16px 0 !important;
+    text-align: center !important;
+  }
+  .auth-logo {
+    height: 115px !important;
+    width: auto !important;
+    padding: 8px 24px !important;
+    border-radius: 12px !important;
+  }
+  @media (max-width: 640px) {
+    .auth-app-title {
+      font-size: 36px !important;
+    }
+    .auth-logo {
+      height: 85px !important;
+    }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<main class="auth">
+  <h1 class="auth-app-title">SQL QUERY PRACTICE</h1>
+  <div class="auth-card">
+    <div class="auth-brand">
+      <img src="{% asset 'images/isct_logo.png' %}" alt="ISCT Logo" class="auth-logo">
+    </div>
+    <h2>Welcome back</h2>
+    <p class="muted">Log in to continue practising PostgreSQL.</p>
+    <form method="post" class="form">
+      {% csrf_token %}
+      <label>Email<input type="email" name="email" value="{{ email }}" required autofocus autocomplete="email"></label>
+      <label>
+        <span class="label-row">Password <a href="{% url 'forgot_password' %}" class="small">Forgot password?</a></span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <label class="check"><input type="checkbox" name="remember" checked> Keep me logged in</label>
+      <button class="btn btn-primary btn-block" type="submit">Log in</button>
+    </form>
+    <p class="auth-switch">New here? <a href="{% url 'register' %}">Create an account</a></p>
+  </div>
+</main>
+{% endblock %}

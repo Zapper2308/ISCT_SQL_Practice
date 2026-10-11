@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% load humanize sqlpractice_tags %}
+{% block title %}Student progress{% endblock %}
+{% block content %}
+<main class="page wide">
+  <div class="page-head">
+    <div>
+      <span class="admin-pill">Admin</span>
+      <h1>Student progress</h1>
+      <p class="muted">Progress of every registered student across {{ summary.total_questions|intcomma }} questions.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <a class="btn btn-ghost" href="/django-admin/">⚙ Database Admin</a>
+      <a class="btn btn-ghost" href="{% url 'admin_export' %}">⬇ Export CSV</a>
+    </div>
+  </div>
+
+  <section class="kpis kpis-4">
+    <div class="kpi"><div class="kpi-label">Students</div><div class="kpi-value">{{ summary.students }}</div></div>
+    <div class="kpi"><div class="kpi-label">Active this week</div><div class="kpi-value">{{ summary.active_week }}</div></div>
+    <div class="kpi"><div class="kpi-label">Questions solved (all students)</div><div class="kpi-value">{{ summary.solved|intcomma }}</div></div>
+    <div class="kpi"><div class="kpi-label">Average solved per student</div><div class="kpi-value">{{ summary.avg_solved }}</div></div>
+  </section>
+
+  {% if approval_requests %}
+  <section class="card approval-card">
+    <div class="card-head">
+      <h2>Student Approval Requests <span class="count-pill count-pill-approval">{{ approval_requests|length }}</span></h2>
+      <span class="muted small">New students require administrator approval before they can log in.</span>
+    </div>
+    <ul class="approval-list">
+      {% for r in approval_requests %}
+      <li>
+        <span class="avatar sm">{{ r.name|initial }}</span>
+        <span class="approval-who">
+          <strong>{{ r.name }}</strong><br>
+          <span class="muted small">{{ r.email }} · registered {{ r.created_at|localdt }}</span>
+        </span>
+        <span class="approval-actions">
+          <form method="post" action="{% url 'admin_approve_student' r.id %}">
+            {% csrf_token %}
+            <button class="btn btn-primary btn-sm" type="submit">Approve</button>
+          </form>
+          <form method="post" action="{% url 'admin_reject_student' r.id %}" onsubmit="return confirm('Are you sure you want to reject and remove this registration request?');">
+            {% csrf_token %}
+            <button class="btn btn-ghost btn-sm" type="submit">Reject</button>
+          </form>
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if reset_requests %}
+  <section class="card reset-card">
+    <div class="card-head">
+      <h2>Password reset requests <span class="count-pill">{{ reset_requests|length }}</span></h2>
+      <span class="muted small">Create a link and send it to the student - it works once and expires in {{ reset_hours }} hours.</span>
+    </div>
+    <ul class="reset-list">
+      {% for r in reset_requests %}
+      <li>
+        <span class="avatar sm">{{ r.user.name|initial }}</span>
+        <span class="reset-who"><strong>{{ r.user.name }}</strong><br><span class="muted small">{{ r.user.email }} · requested {{ r.created_at|localdt }}{% if r.emailed %} · emailed{% endif %}</span></span>
+        <span class="reset-actions">
+          <button class="btn btn-primary btn-sm make-link" data-url="{% url 'admin_reset_link' r.id %}">Create reset link</button>
+          <form method="post" action="{% url 'admin_dismiss_reset' r.id %}">
+            {% csrf_token %}
+            <button class="btn btn-ghost btn-sm" type="submit">Dismiss</button>
+          </form>
+        </span>
+        <span class="reset-link-box" hidden>
+          <input type="text" readonly class="search reset-link-input" aria-label="Reset link">
+          <button class="btn btn-ghost btn-sm copy-link" type="button">Copy</button>
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Student Report</h2>
+      <input type="search" class="search" id="student-search" placeholder="Search name or email…">
+    </div>
+    {% if students %}
+    <div class="table-wrap">
+      <table class="matrix sortable" id="students">
+        <thead>
+          <tr>
+            <th data-sort="text">Student</th>
+            <th data-sort="text">Status</th>
+            <th data-sort="num" class="r">Solved</th>
+            {% for d, label in DIFFICULTY_CHOICES %}<th data-sort="num" class="r diff-text-{{ d }}">{{ label }}</th>{% endfor %}
+            <th data-sort="num" class="r" title="Accepted by exact result match / by the AI checker">Match / AI</th>
+            <th data-sort="num" class="r">In progress</th>
+            <th data-sort="num" class="r">Queries run</th>
+            <th data-sort="num" class="r">Answers revealed</th>
+            <th data-sort="text">Last active</th>
+            <th data-sort="text">Registered</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          <tr data-search="{{ s.user.name|lower }} {{ s.user.email|lower }}">
+            <td data-v="{{ s.user.name|lower }}">
+              <a class="student-link" href="{% url 'admin_student' s.user.id %}">
+                <span class="avatar sm">{{ s.user.name|initial }}</span>
+                <span><strong>{{ s.user.name }}</strong><br><span class="muted small">{{ s.user.email }}</span></span>
+              </a>
+            </td>
+            <td data-v="{{ s.status_order }}"><span class="student-status {{ s.status }}">{{ s.status_label }}</span></td>
+            <td class="r" data-v="{{ s.solved }}">
+              <strong>{{ s.solved }}</strong>
+              <span class="mini-bar total"><span style="width: {{ s.pct }}%"></span></span>
+            </td>
+            {% for c in s.diff_cells %}
+            <td class="r mono" data-v="{{ c.solved }}">{{ c.solved }}<span class="muted">/{{ c.total }}</span></td>
+            {% endfor %}
+            <td class="r mono" data-v="{{ s.auto }}">{{ s.auto }} / {{ s.ai }}</td>
+            <td class="r mono" data-v="{{ s.attempted }}">{{ s.attempted }}</td>
+            <td class="r mono" data-v="{{ s.runs }}">{{ s.runs }}</td>
+            <td class="r mono" data-v="{{ s.revealed }}">{{ s.revealed }}</td>
+            <td data-v="{{ s.last_active|date:'c' }}">{% if s.last_active %}{{ s.last_active|localdt }}{% else %}—{% endif %}</td>
+            <td data-v="{{ s.user.created_at|date:'c' }}">{{ s.user.created_at|localdt:"%d %b %Y" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small" id="no-match" hidden>No students match your search.</p>
+    {% else %}
+    <div class="empty"><p class="muted">No students have registered yet. Share the app link with them to get started.</p></div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="{% asset 'js/admin.js' %}"></script>
+{% endblock %}

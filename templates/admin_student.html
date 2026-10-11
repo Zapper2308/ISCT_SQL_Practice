@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% load humanize sqlpractice_tags %}
+{% block title %}Admin · {{ student.name }}{% endblock %}
+{% block content %}
+<main class="page wide">
+  <a class="back-link" href="{% url 'admin_home' %}">‹ All students</a>
+  <div class="page-head">
+    <div class="student-head">
+      <span class="avatar lg">{{ student.name|initial }}</span>
+      <div>
+        <h1>{{ student.name }} {% if student.is_admin %}<span class="admin-pill">Admin</span>{% endif %}</h1>
+        <p class="muted">{{ student.email }} · registered {{ student.created_at|localdt:"%d %b %Y" }}
+          · last active {% if stats.last_active %}{{ stats.last_active|localdt }}{% else %}never{% endif %}</p>
+      </div>
+    </div>
+    <details class="reset-pw">
+      <summary class="btn btn-ghost">Reset password</summary>
+      <form method="post" action="{% url 'admin_reset_password' student.id %}" class="form inline-form">
+        {% csrf_token %}
+        <input type="password" name="password" placeholder="New password (min 8 chars)" minlength="8" required autocomplete="new-password">
+        <button class="btn btn-primary" type="submit">Set password</button>
+      </form>
+    </details>
+  </div>
+
+  <section class="kpis">
+    <div class="kpi kpi-hero">
+      <div class="ring" style="--p: {{ stats.pct }}"><span>{{ stats.pct }}%</span></div>
+      <div>
+        <div class="kpi-label">Solved</div>
+        <div class="kpi-value">{{ stats.solved }}<small> / {{ stats.total|intcomma }}</small></div>
+      </div>
+    </div>
+    <div class="kpi"><div class="kpi-label">Solved this week</div><div class="kpi-value">{{ stats.week }}</div></div>
+    <div class="kpi"><div class="kpi-label">In progress</div><div class="kpi-value">{{ stats.attempted }}</div></div>
+    <div class="kpi"><div class="kpi-label">Queries run</div><div class="kpi-value">{{ stats.runs }}</div><div class="kpi-sub">{{ stats.revealed }} answers revealed</div></div>
+  </section>
+
+  <section class="diff-cards">
+    {% for s in diff_cards %}
+    <div class="diff-card diff-{{ s.key }}">
+      <div class="diff-card-top"><span class="diff-pill diff-{{ s.key }}">{{ s.label }}</span><span class="diff-pct">{{ s.pct }}%</span></div>
+      <div class="diff-count"><strong>{{ s.solved }}</strong> / {{ s.total|intcomma }} solved</div>
+      <div class="bar"><span style="width: {{ s.pct }}%"></span></div>
+      <div class="kpi-sub">{{ s.attempted }} in progress</div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Question history <span class="muted small">({{ attempts|length }})</span></h2>
+      <div class="filters">
+        <select id="f-diff" class="select">
+          <option value="">All difficulties</option>
+          {% for d, label in DIFFICULTY_CHOICES %}<option value="{{ d }}">{{ label }}</option>{% endfor %}
+        </select>
+        <select id="f-status" class="select">
+          <option value="">Any status</option><option value="solved">Solved</option><option value="attempted">In progress</option>
+        </select>
+        <input type="search" class="search" id="f-text" placeholder="Search topic or question…">
+      </div>
+    </div>
+    {% if attempts %}
+    <div class="table-wrap">
+      <table class="matrix history" id="history">
+        <thead><tr><th>Question</th><th>Difficulty</th><th>Status</th><th class="r">Runs</th><th>Answer</th><th>Updated</th><th></th></tr></thead>
+        <tbody>
+          {% for a in attempts %}{% with p=a.p q=a.q %}
+          <tr class="h-row" data-diff="{{ q.difficulty }}" data-status="{{ p.status }}"
+              data-search="{{ a.search }}">
+            <td class="h-q">
+              <span class="activity-title">{{ a.topic.title }} · Section {{ q.section }} · Q{{ q.number }}</span>
+              <span class="activity-text">{{ q.text }}</span>
+            </td>
+            <td><span class="diff-pill diff-{{ q.difficulty }} sm">{{ a.label }}</span></td>
+            <td>
+              <span class="status-badge {{ p.status }}">{% if p.status == 'solved' %}✓ Solved{% else %}In progress{% endif %}</span>
+              {% if p.status == 'solved' %}<span class="muted small">{{ a.method_label }}</span>{% endif %}
+            </td>
+            <td class="r mono">{{ p.attempts }}</td>
+            <td>{% if p.answer_revealed %}<span class="revealed-badge">Revealed</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+            <td class="nowrap">{{ p.updated_at|localdt:"%d %b, %H:%M" }}</td>
+            <td>{% if p.last_query %}<button class="btn btn-ghost btn-sm toggle-sql">View answer</button>{% endif %}</td>
+          </tr>
+          {% if p.last_query %}
+          <tr class="sql-row" hidden><td colspan="7"><pre class="student-sql"><code>{{ p.last_query }}</code></pre></td></tr>
+          {% endif %}
+          {% endwith %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small" id="no-match" hidden>No questions match these filters.</p>
+    {% else %}
+    <div class="empty"><p class="muted">{{ student.name }} hasn't attempted any questions yet.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="card" style="margin-top: 14px">
+    <div class="card-head"><h2>Progress by topic</h2><span class="muted small">solved / total per difficulty</span></div>
+    <div class="table-wrap">
+      <table class="matrix">
+        <thead><tr><th>Topic</th>{% for d, label in DIFFICULTY_CHOICES %}<th class="diff-text-{{ d }}">{{ label }}</th>{% endfor %}<th>Total</th></tr></thead>
+        <tbody>
+          {% for row in topic_rows %}
+          <tr>
+            <td class="topic-cell"><span class="topic-num">{{ row.topic.order|stringformat:"02d" }}</span>{{ row.topic.title }}</td>
+            {% for c in row.cells %}
+            <td>
+              <span class="cell-num {{ c.state }}">{{ c.solved }}/{{ c.total }}</span>
+              <span class="mini-bar diff-{{ c.key }}"><span style="width: {{ c.pct }}%"></span></span>
+            </td>
+            {% endfor %}
+            <td class="total-cell">{{ row.solved }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="{% asset 'js/admin.js' %}"></script>
+{% endblock %}
