@@ -523,15 +523,65 @@ class Sandbox:
                     """, (exclude_list,))
                     triggers = cur.fetchall()
 
+                    cur.execute("""
+                        SELECT
+                            con.conname AS fk_name,
+                            src_ns.nspname AS src_schema,
+                            src_tbl.relname AS src_table,
+                            src_att.attname AS src_column,
+                            tgt_ns.nspname AS tgt_schema,
+                            tgt_tbl.relname AS tgt_table,
+                            tgt_att.attname AS tgt_column
+                        FROM (
+                            SELECT
+                                conname,
+                                conrelid,
+                                confrelid,
+                                unnest(conkey) AS conkey_elem,
+                                unnest(confkey) AS confkey_elem
+                            FROM pg_constraint
+                            WHERE contype = 'f'
+                        ) con
+                        JOIN pg_class src_tbl ON src_tbl.oid = con.conrelid
+                        JOIN pg_namespace src_ns ON src_ns.oid = src_tbl.relnamespace
+                        JOIN pg_attribute src_att ON src_att.attrelid = con.conrelid AND src_att.attnum = con.conkey_elem
+                        JOIN pg_class tgt_tbl ON tgt_tbl.oid = con.confrelid
+                        JOIN pg_namespace tgt_ns ON tgt_ns.oid = tgt_tbl.relnamespace
+                        JOIN pg_attribute tgt_att ON tgt_att.attrelid = con.confrelid AND tgt_att.attnum = con.confkey_elem
+                        WHERE LEFT(src_ns.nspname, 3) != 'pg_'
+                          AND LEFT(tgt_ns.nspname, 3) != 'pg_'
+                          AND NOT (src_ns.nspname = ANY(%s))
+                          AND NOT (tgt_ns.nspname = ANY(%s))
+                        ORDER BY src_schema, src_table, fk_name;
+                    """, (exclude_list, exclude_list))
+                    foreign_keys = cur.fetchall()
+
             tree = {
                 "database": db_name,
-                "schemas": {}
+                "schemas": {},
+                "relationships": [
+                    {
+                        "name": r[0],
+                        "source_schema": r[1],
+                        "source_table": r[2],
+                        "source_column": r[3],
+                        "target_schema": r[4],
+                        "target_table": r[5],
+                        "target_column": r[6],
+                    }
+                    for r in foreign_keys
+                ]
             }
+
+            fk_col_map = {(r[1], r[2], r[3]): {"to_schema": r[4], "to_table": r[5], "to_column": r[6]} for r in foreign_keys}
 
             cols_map = {}
             for s, t, col, ty, null, default, pk in cols:
+                fk_info = fk_col_map.get((s, t, col))
                 cols_map.setdefault((s, t), []).append({
-                    "name": col, "type": ty, "nullable": null, "default": default, "is_pk": pk
+                    "name": col, "type": ty, "nullable": null, "default": default, "is_pk": pk,
+                    "is_fk": bool(fk_info),
+                    "fk_to": f"{fk_info['to_schema']}.{fk_info['to_table']}({fk_info['to_column']})" if fk_info else None
                 })
 
             cons_map = {}

@@ -675,6 +675,535 @@
     });
   });
 
+  // ------------------------------------------------------------------ ERD Engine (PostgreSQL / pgAdmin 4 Style)
+  const erdBtn = $('schema-erd-btn');
+  const erdModal = $('erd-modal');
+  const erdWindow = $('erd-window');
+  const erdCloseBtn = $('erd-close-btn');
+  const erdMaximizeBtn = $('erd-maximize-btn');
+  const erdSchemaSelect = $('erd-schema-select');
+  const erdSearchInput = $('erd-search-input');
+  const erdZoomIn = $('erd-zoom-in');
+  const erdZoomOut = $('erd-zoom-out');
+  const erdZoomFit = $('erd-zoom-fit');
+  const erdAutoArrange = $('erd-auto-arrange');
+  const erdZoomLevel = $('erd-zoom-level');
+  const erdViewport = $('erd-viewport');
+  const erdCanvas = $('erd-canvas');
+  const erdSvgLayer = $('erd-svg-layer');
+  const erdLinksGroup = $('erd-links-group');
+  const erdNodesLayer = $('erd-nodes-layer');
+  const erdDbName = $('erd-db-name');
+  const erdCountTables = $('erd-count-tables');
+  const erdCountColumns = $('erd-count-columns');
+  const erdCountLinks = $('erd-count-links');
+
+  let erdZoom = 1;
+  let erdPanX = 60;
+  let erdPanY = 60;
+  let erdPositions = {};
+  let erdTables = [];
+  let erdLinks = [];
+
+  function updateErdTransform() {
+    if (!erdCanvas) return;
+    erdCanvas.style.transform = `translate(${erdPanX}px, ${erdPanY}px) scale(${erdZoom})`;
+    if (erdZoomLevel) erdZoomLevel.textContent = `${Math.round(erdZoom * 100)}%`;
+  }
+
+  function openERD() {
+    if (!erdModal) return;
+    erdModal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (!rawSchemaData) {
+      loadSchema();
+      const poll = setInterval(() => {
+        if (rawSchemaData) {
+          clearInterval(poll);
+          buildAndRenderERD();
+        }
+      }, 150);
+    } else {
+      buildAndRenderERD();
+    }
+  }
+
+  function closeERD() {
+    if (!erdModal) return;
+    erdModal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  if (erdBtn) erdBtn.addEventListener('click', openERD);
+  if (erdCloseBtn) erdCloseBtn.addEventListener('click', closeERD);
+  if (erdModal) {
+    erdModal.addEventListener('click', (e) => {
+      if (e.target === erdModal) closeERD();
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && erdModal && !erdModal.hidden) {
+      closeERD();
+    }
+  });
+  if (erdMaximizeBtn && erdWindow) {
+    erdMaximizeBtn.addEventListener('click', () => {
+      erdWindow.classList.toggle('maximized');
+      setTimeout(fitERDToScreen, 150);
+    });
+  }
+
+  function buildAndRenderERD(resetPositions = false) {
+    if (!rawSchemaData || !erdNodesLayer || !erdLinksGroup) return;
+
+    if (erdDbName) erdDbName.textContent = rawSchemaData.database || 'Database';
+
+    const schemas = rawSchemaData.schemas || {};
+    const schemaNames = Object.keys(schemas).sort();
+    if (erdSchemaSelect && erdSchemaSelect.options.length <= 1) {
+      schemaNames.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = `${s} (${Object.keys(schemas[s].tables || {}).length} tables)`;
+        erdSchemaSelect.appendChild(opt);
+      });
+    }
+
+    const currentSchemaFilter = erdSchemaSelect ? erdSchemaSelect.value : 'all';
+    const searchQuery = erdSearchInput ? erdSearchInput.value.trim().toLowerCase() : '';
+
+    erdTables = [];
+    schemaNames.forEach(s => {
+      const tbls = schemas[s].tables || {};
+      Object.keys(tbls).forEach(t => {
+        const tblData = tbls[t];
+        erdTables.push({
+          id: `${s}.${t}`,
+          schema: s,
+          name: t,
+          columns: tblData.columns || [],
+          constraints: tblData.constraints || []
+        });
+      });
+    });
+
+    const rawRels = rawSchemaData.relationships || [];
+    erdLinks = rawRels.map(r => ({
+      name: r.name,
+      srcId: `${r.source_schema}.${r.source_table}`,
+      tgtId: `${r.target_schema}.${r.target_table}`,
+      srcCol: r.source_column,
+      tgtCol: r.target_column,
+    }));
+
+    let visibleTables = erdTables;
+    if (currentSchemaFilter !== 'all') {
+      const relevantIds = new Set();
+      erdTables.forEach(t => {
+        if (t.schema === currentSchemaFilter) relevantIds.add(t.id);
+      });
+      erdLinks.forEach(l => {
+        if (relevantIds.has(l.srcId)) relevantIds.add(l.tgtId);
+        if (relevantIds.has(l.tgtId)) relevantIds.add(l.srcId);
+      });
+      visibleTables = erdTables.filter(t => relevantIds.has(t.id));
+    }
+
+    if (searchQuery) {
+      visibleTables = visibleTables.filter(t => {
+        return t.name.toLowerCase().includes(searchQuery) ||
+               t.schema.toLowerCase().includes(searchQuery) ||
+               t.columns.some(c => c.name.toLowerCase().includes(searchQuery));
+      });
+    }
+
+    const visibleIds = new Set(visibleTables.map(t => t.id));
+    const visibleLinks = erdLinks.filter(l => visibleIds.has(l.srcId) && visibleIds.has(l.tgtId));
+
+    if (erdCountTables) erdCountTables.textContent = visibleTables.length;
+    if (erdCountColumns) erdCountColumns.textContent = visibleTables.reduce((acc, t) => acc + t.columns.length, 0);
+    if (erdCountLinks) erdCountLinks.textContent = visibleLinks.length;
+
+    if (resetPositions || Object.keys(erdPositions).length === 0) {
+      arrangeTableLayout(visibleTables);
+    } else {
+      let nextCol = 0, nextRow = 0;
+      visibleTables.forEach((t) => {
+        if (!erdPositions[t.id]) {
+          erdPositions[t.id] = { x: 50 + nextCol * 360, y: 50 + nextRow * 320 };
+          nextCol++;
+          if (nextCol > 3) { nextCol = 0; nextRow++; }
+        }
+      });
+    }
+
+    erdNodesLayer.innerHTML = '';
+    visibleTables.forEach(tbl => {
+      const pos = erdPositions[tbl.id] || { x: 60, y: 60 };
+      const card = document.createElement('div');
+      card.className = 'erd-table-card';
+      card.id = `erd-node-${tbl.id.replace(/\./g, '__')}`;
+      card.dataset.tableId = tbl.id;
+      card.style.left = `${pos.x}px`;
+      card.style.top = `${pos.y}px`;
+
+      let colsHtml = '';
+      tbl.columns.forEach(c => {
+        const isPk = Boolean(c.is_pk);
+        const isFk = Boolean(c.is_fk);
+        const rowClass = isPk ? 'is-pk' : (isFk ? 'is-fk' : '');
+        const fkTitle = c.fk_to ? `References ${c.fk_to}` : (isPk ? 'Primary Key' : '');
+        colsHtml += `
+          <div class="erd-card-row ${rowClass}" data-col-name="${escapeHtml(c.name)}" title="${escapeHtml(fkTitle)}">
+            <span class="erd-col-name">
+              ${isPk ? '<span class="badge-pk-icon" title="Primary Key">🔑</span>' : (isFk ? '<span class="badge-fk-icon" title="Foreign Key">🔗</span>' : '')}
+              <span>${escapeHtml(c.name)}</span>
+            </span>
+            <span class="erd-col-type">${escapeHtml(c.type || '')}</span>
+          </div>`;
+      });
+
+      card.innerHTML = `
+        <div class="erd-card-header">
+          <div class="erd-card-title" title="${escapeHtml(tbl.id)}">
+            <span class="tbl-icon">🗃️</span> ${escapeHtml(tbl.name)}
+          </div>
+          <span class="erd-card-schema">${escapeHtml(tbl.schema)}</span>
+        </div>
+        <div class="erd-card-body">
+          ${colsHtml}
+        </div>`;
+
+      setupTableDrag(card, tbl.id);
+
+      card.addEventListener('mouseenter', () => highlightConnected(tbl.id));
+      card.addEventListener('mouseleave', () => clearHighlight());
+
+      card.addEventListener('dblclick', (e) => {
+        const colRow = e.target.closest('.erd-card-row');
+        const textToInsert = colRow ? colRow.dataset.colName : `${tbl.schema}.${tbl.name}`;
+        editor.replaceSelection(textToInsert);
+        editor.focus();
+      });
+
+      erdNodesLayer.appendChild(card);
+    });
+
+    renderSvgLinks(visibleLinks);
+
+    if (resetPositions) {
+      setTimeout(fitERDToScreen, 50);
+    }
+  }
+
+  function arrangeTableLayout(tables) {
+    erdPositions = {};
+    const cols = Math.max(2, Math.ceil(Math.sqrt(tables.length * 1.4)));
+    const colWidth = 360;
+    const rowHeight = 330;
+    tables.forEach((t, i) => {
+      const colIdx = i % cols;
+      const rowIdx = Math.floor(i / cols);
+      erdPositions[t.id] = {
+        x: 60 + colIdx * colWidth,
+        y: 60 + rowIdx * rowHeight
+      };
+    });
+  }
+
+  function renderSvgLinks(links) {
+    if (!erdLinksGroup) return;
+    erdLinksGroup.innerHTML = '';
+    links.forEach((l, index) => {
+      const srcNode = $(`erd-node-${l.srcId.replace(/\./g, '__')}`);
+      const tgtNode = $(`erd-node-${l.tgtId.replace(/\./g, '__')}`);
+      if (!srcNode || !tgtNode) return;
+
+      const srcPos = erdPositions[l.srcId] || { x: 0, y: 0 };
+      const tgtPos = erdPositions[l.tgtId] || { x: 0, y: 0 };
+      const cardWidth = 270;
+
+      let srcY = srcPos.y + 70;
+      let tgtY = tgtPos.y + 70;
+      const srcColElem = srcNode.querySelector(`[data-col-name="${l.srcCol}"]`);
+      const tgtColElem = tgtNode.querySelector(`[data-col-name="${l.tgtCol}"]`);
+      if (srcColElem) srcY = srcPos.y + srcColElem.offsetTop + 12;
+      if (tgtColElem) tgtY = tgtPos.y + tgtColElem.offsetTop + 12;
+
+      let srcX = srcPos.x + cardWidth;
+      let tgtX = tgtPos.x;
+      if (tgtPos.x < srcPos.x) {
+        srcX = srcPos.x;
+        tgtX = tgtPos.x + cardWidth;
+      }
+
+      const dx = Math.max(50, Math.abs(tgtX - srcX) * 0.45);
+      const c1x = srcX + (tgtX >= srcX ? dx : -dx);
+      const c2x = tgtX + (tgtX >= srcX ? -dx : dx);
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${srcX} ${srcY} C ${c1x} ${srcY}, ${c2x} ${tgtY}, ${tgtX} ${tgtY}`);
+      path.setAttribute('class', 'erd-link-line');
+      path.setAttribute('data-src', l.srcId);
+      path.setAttribute('data-tgt', l.tgtId);
+      path.setAttribute('data-link-id', `link-${index}`);
+      path.setAttribute('marker-start', 'url(#erd-dot)');
+      path.setAttribute('marker-end', 'url(#erd-arrow)');
+
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = `${l.srcId}(${l.srcCol}) → ${l.tgtId}(${l.tgtCol})`;
+      path.appendChild(title);
+
+      path.addEventListener('mouseenter', () => {
+        path.classList.add('active');
+        highlightNode(l.srcId);
+        highlightNode(l.tgtId);
+      });
+      path.addEventListener('mouseleave', () => {
+        path.classList.remove('active');
+        clearHighlight();
+      });
+
+      erdLinksGroup.appendChild(path);
+    });
+  }
+
+  function updateLinksForTable(tableId) {
+    if (!erdLinksGroup) return;
+    const visibleLinks = erdLinks.filter(l => (l.srcId === tableId || l.tgtId === tableId) && erdPositions[l.srcId] && erdPositions[l.tgtId]);
+
+    visibleLinks.forEach(l => {
+      const srcNode = $(`erd-node-${l.srcId.replace(/\./g, '__')}`);
+      const tgtNode = $(`erd-node-${l.tgtId.replace(/\./g, '__')}`);
+      if (!srcNode || !tgtNode) return;
+
+      const path = erdLinksGroup.querySelector(`.erd-link-line[data-src="${l.srcId}"][data-tgt="${l.tgtId}"]`);
+      if (!path) return;
+
+      const srcPos = erdPositions[l.srcId];
+      const tgtPos = erdPositions[l.tgtId];
+      const cardWidth = 270;
+
+      let srcY = srcPos.y + 70;
+      let tgtY = tgtPos.y + 70;
+      const srcColElem = srcNode.querySelector(`[data-col-name="${l.srcCol}"]`);
+      const tgtColElem = tgtNode.querySelector(`[data-col-name="${l.tgtCol}"]`);
+      if (srcColElem) srcY = srcPos.y + srcColElem.offsetTop + 12;
+      if (tgtColElem) tgtY = tgtPos.y + tgtColElem.offsetTop + 12;
+
+      let srcX = srcPos.x + cardWidth;
+      let tgtX = tgtPos.x;
+      if (tgtPos.x < srcPos.x) {
+        srcX = srcPos.x;
+        tgtX = tgtPos.x + cardWidth;
+      }
+
+      const dx = Math.max(50, Math.abs(tgtX - srcX) * 0.45);
+      const c1x = srcX + (tgtX >= srcX ? dx : -dx);
+      const c2x = tgtX + (tgtX >= srcX ? -dx : dx);
+
+      path.setAttribute('d', `M ${srcX} ${srcY} C ${c1x} ${srcY}, ${c2x} ${tgtY}, ${tgtX} ${tgtY}`);
+    });
+  }
+
+  function setupTableDrag(card, tableId) {
+    card.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button') || e.target.closest('.erd-card-body')) return;
+      e.stopPropagation();
+      card.setPointerCapture(e.pointerId);
+      card.classList.add('dragging');
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const pos = erdPositions[tableId] || { x: card.offsetLeft, y: card.offsetTop };
+      const origX = pos.x;
+      const origY = pos.y;
+
+      const onPointerMove = (ev) => {
+        const dx = (ev.clientX - startX) / erdZoom;
+        const dy = (ev.clientY - startY) / erdZoom;
+        const newX = origX + dx;
+        const newY = origY + dy;
+        pos.x = newX;
+        pos.y = newY;
+        card.style.left = `${newX}px`;
+        card.style.top = `${newY}px`;
+        requestAnimationFrame(() => updateLinksForTable(tableId));
+      };
+
+      const onPointerUp = (ev) => {
+        card.releasePointerCapture(ev.pointerId);
+        card.classList.remove('dragging');
+        card.removeEventListener('pointermove', onPointerMove);
+        card.removeEventListener('pointerup', onPointerUp);
+        erdPositions[tableId] = { x: pos.x, y: pos.y };
+      };
+
+      card.addEventListener('pointermove', onPointerMove);
+      card.addEventListener('pointerup', onPointerUp);
+    });
+  }
+
+  function highlightConnected(tableId) {
+    if (!erdNodesLayer || !erdLinksGroup) return;
+    const connectedTableIds = new Set([tableId]);
+
+    const lines = erdLinksGroup.querySelectorAll('.erd-link-line');
+    lines.forEach(l => {
+      const src = l.getAttribute('data-src');
+      const tgt = l.getAttribute('data-tgt');
+      if (src === tableId || tgt === tableId) {
+        l.classList.add('active');
+        l.classList.remove('dimmed');
+        connectedTableIds.add(src);
+        connectedTableIds.add(tgt);
+      } else {
+        l.classList.add('dimmed');
+        l.classList.remove('active');
+      }
+    });
+
+    const cards = erdNodesLayer.querySelectorAll('.erd-table-card');
+    cards.forEach(c => {
+      const tId = c.dataset.tableId;
+      if (connectedTableIds.has(tId)) {
+        c.classList.add('highlighted');
+        c.classList.remove('dimmed');
+      } else {
+        c.classList.add('dimmed');
+        c.classList.remove('highlighted');
+      }
+    });
+  }
+
+  function highlightNode(tableId) {
+    const card = $(`erd-node-${tableId.replace(/\./g, '__')}`);
+    if (card) card.classList.add('highlighted');
+  }
+
+  function clearHighlight() {
+    if (!erdNodesLayer || !erdLinksGroup) return;
+    erdLinksGroup.querySelectorAll('.erd-link-line').forEach(l => {
+      l.classList.remove('active', 'dimmed');
+    });
+    erdNodesLayer.querySelectorAll('.erd-table-card').forEach(c => {
+      c.classList.remove('highlighted', 'dimmed');
+    });
+  }
+
+  function fitERDToScreen() {
+    if (!erdViewport || !erdNodesLayer) return;
+    const cards = Array.from(erdNodesLayer.querySelectorAll('.erd-table-card'));
+    if (cards.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    cards.forEach(c => {
+      const x = c.offsetLeft;
+      const y = c.offsetTop;
+      const w = c.offsetWidth || 270;
+      const h = c.offsetHeight || 200;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    });
+
+    const padding = 60;
+    const contentW = maxX - minX + padding * 2;
+    const contentH = maxY - minY + padding * 2;
+    const viewW = erdViewport.clientWidth || 1000;
+    const viewH = erdViewport.clientHeight || 700;
+
+    const scaleX = viewW / contentW;
+    const scaleY = viewH / contentH;
+    erdZoom = Math.min(1.2, Math.max(0.3, Math.min(scaleX, scaleY)));
+
+    erdPanX = (viewW - (maxX - minX) * erdZoom) / 2 - minX * erdZoom;
+    erdPanY = (viewH - (maxY - minY) * erdZoom) / 2 - minY * erdZoom;
+
+    updateErdTransform();
+  }
+
+  if (erdViewport) {
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0;
+
+    erdViewport.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.erd-table-card') || e.target.closest('button') || e.target.closest('input')) return;
+      isPanning = true;
+      erdViewport.setPointerCapture(e.pointerId);
+      erdViewport.classList.add('panning');
+      panStartX = e.clientX - erdPanX;
+      panStartY = e.clientY - erdPanY;
+
+      const onPointerMove = (ev) => {
+        if (!isPanning) return;
+        erdPanX = ev.clientX - panStartX;
+        erdPanY = ev.clientY - panStartY;
+        updateErdTransform();
+      };
+
+      const onPointerUp = (ev) => {
+        isPanning = false;
+        erdViewport.releasePointerCapture(ev.pointerId);
+        erdViewport.classList.remove('panning');
+        erdViewport.removeEventListener('pointermove', onPointerMove);
+        erdViewport.removeEventListener('pointerup', onPointerUp);
+      };
+
+      erdViewport.addEventListener('pointermove', onPointerMove);
+      erdViewport.addEventListener('pointerup', onPointerUp);
+    });
+
+    erdViewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = erdViewport.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const oldZoom = erdZoom;
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+      erdZoom = Math.max(0.2, Math.min(2.5, erdZoom * zoomFactor));
+
+      erdPanX = mouseX - (mouseX - erdPanX) * (erdZoom / oldZoom);
+      erdPanY = mouseY - (mouseY - erdPanY) * (erdZoom / oldZoom);
+      updateErdTransform();
+    }, { passive: false });
+  }
+
+  if (erdZoomIn) {
+    erdZoomIn.addEventListener('click', () => {
+      erdZoom = Math.min(2.5, erdZoom * 1.25);
+      updateErdTransform();
+    });
+  }
+  if (erdZoomOut) {
+    erdZoomOut.addEventListener('click', () => {
+      erdZoom = Math.max(0.2, erdZoom * 0.8);
+      updateErdTransform();
+    });
+  }
+  if (erdZoomFit) {
+    erdZoomFit.addEventListener('click', fitERDToScreen);
+  }
+  if (erdAutoArrange) {
+    erdAutoArrange.addEventListener('click', () => {
+      buildAndRenderERD(true);
+    });
+  }
+  if (erdSchemaSelect) {
+    erdSchemaSelect.addEventListener('change', () => {
+      buildAndRenderERD(true);
+    });
+  }
+  if (erdSearchInput) {
+    let erdSearchTimer = null;
+    erdSearchInput.addEventListener('input', () => {
+      clearTimeout(erdSearchTimer);
+      erdSearchTimer = setTimeout(() => buildAndRenderERD(false), 200);
+    });
+  }
+
   // Initial load
   loadSchema();
 

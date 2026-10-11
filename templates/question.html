@@ -56,10 +56,15 @@
             <button type="button" class="btn-icon" id="schema-toggle-btn" title="Hide explorer panel">◀</button>
           </div>
         </div>
-        <div class="schema-search-wrap">
-          <span class="schema-search-icon">🔍</span>
-          <input type="search" id="schema-search-input" class="schema-search-input" placeholder="Search tables, columns, indexes…" autocomplete="off">
-          <button type="button" id="schema-search-clear" class="schema-search-clear" title="Clear search" hidden>✕</button>
+        <div class="schema-search-row">
+          <div class="schema-search-wrap">
+            <span class="schema-search-icon">🔍</span>
+            <input type="search" id="schema-search-input" class="schema-search-input" placeholder="Search tables, columns, indexes…" autocomplete="off">
+            <button type="button" id="schema-search-clear" class="schema-search-clear" title="Clear search" hidden>✕</button>
+          </div>
+          <button type="button" class="btn btn-sm btn-erd" id="schema-erd-btn" title="Open PostgreSQL ERD (Entity Relationship Diagram)">
+            <span class="erd-btn-icon">📊</span> ERD
+          </button>
         </div>
         <div id="schema-search-stats" class="schema-search-stats" hidden></div>
       </div>
@@ -128,6 +133,81 @@
   </form>
 </div>
 {% endif %}
+<!-- ERD Popup Window (PostgreSQL / pgAdmin style) -->
+<div class="modal-backdrop erd-modal-backdrop" id="erd-modal" hidden>
+  <div class="erd-window" id="erd-window" role="dialog" aria-labelledby="erd-title" aria-modal="true">
+    <div class="erd-header">
+      <div class="erd-title-group">
+        <span class="erd-icon">📊</span>
+        <div>
+          <h2 class="erd-title" id="erd-title">Entity Relationship Diagram (ERD)</h2>
+          <span class="erd-sub" id="erd-sub">PostgreSQL • Database: <strong id="erd-db-name">postgres</strong></span>
+        </div>
+      </div>
+
+      <div class="erd-toolbar">
+        <div class="erd-filter-group">
+          <label for="erd-schema-select">Schema:</label>
+          <select id="erd-schema-select" class="erd-select">
+            <option value="all">All Schemas (Complete ERD)</option>
+          </select>
+        </div>
+
+        <div class="erd-search-group">
+          <input type="text" id="erd-search-input" class="erd-filter-input" placeholder="Find table in ERD…" autocomplete="off">
+        </div>
+
+        <div class="erd-zoom-group">
+          <button type="button" class="btn-icon" id="erd-zoom-out" title="Zoom Out (Ctrl -)">−</button>
+          <span id="erd-zoom-level" class="erd-zoom-level">100%</span>
+          <button type="button" class="btn-icon" id="erd-zoom-in" title="Zoom In (Ctrl +)">+</button>
+          <button type="button" class="btn-icon" id="erd-zoom-fit" title="Fit to Screen">⛶ Fit</button>
+          <button type="button" class="btn-icon" id="erd-auto-arrange" title="Auto Arrange">🪄 Arrange</button>
+        </div>
+
+        <div class="erd-window-actions">
+          <button type="button" class="btn-icon" id="erd-maximize-btn" title="Toggle fullscreen">🗖</button>
+          <button type="button" class="btn-icon" id="erd-close-btn" title="Close ERD (Esc)">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="erd-canvas-viewport" id="erd-viewport">
+      <div class="erd-canvas" id="erd-canvas">
+        <svg class="erd-svg-layer" id="erd-svg-layer">
+          <defs>
+            <marker id="erd-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+            </marker>
+            <marker id="erd-dot" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
+              <circle cx="5" cy="5" r="4" fill="#f59e0b"/>
+            </marker>
+          </defs>
+          <g id="erd-links-group"></g>
+        </svg>
+        <div class="erd-nodes-layer" id="erd-nodes-layer"></div>
+      </div>
+
+      <div class="erd-minimap-hint">
+        <span>💡 Drag tables to rearrange • Drag canvas or scroll to pan/zoom • Double-click a table or column to insert into query</span>
+      </div>
+    </div>
+
+    <div class="erd-footer">
+      <div class="erd-stats" id="erd-stats">
+        <span>Tables: <strong id="erd-count-tables">0</strong></span>
+        <span>Columns: <strong id="erd-count-columns">0</strong></span>
+        <span>Relationships (FK): <strong id="erd-count-links">0</strong></span>
+      </div>
+      <div class="erd-legend">
+        <span class="legend-item"><span class="badge-pk-icon">🔑</span> PK</span>
+        <span class="legend-item"><span class="badge-fk-icon">🔗</span> FK</span>
+        <span class="legend-item"><span class="legend-line"></span> Reference Line</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 {{ page_data|json_script:"page-data" }}
 {% endblock %}
 {% block scripts %}
