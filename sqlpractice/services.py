@@ -21,8 +21,8 @@ def get_sandbox() -> Sandbox:
     return Sandbox(
         settings.PRACTICE_DATABASE_URL,
         timeout_s=settings.QUERY_TIMEOUT_SECONDS,
-        max_display_rows=settings.MAX_RESULT_ROWS,
-        grade_row_limit=settings.MAX_RESULT_ROWS if settings.MAX_RESULT_ROWS > 0 else None,
+        max_display_rows=500,
+        grade_row_limit=5000,
         pool_max=settings.DB_POOL_MAX,
     )
 

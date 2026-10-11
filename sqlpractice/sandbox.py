@@ -172,7 +172,7 @@ def _grade_value(v):
 # --------------------------------------------------------------------------- sandbox
 
 class Sandbox:
-    def __init__(self, dsn, timeout_s=15, max_display_rows=0, grade_row_limit=None, pool_max=10):
+    def __init__(self, dsn, timeout_s=15, max_display_rows=500, grade_row_limit=5000, pool_max=10):
         self.dsn = dsn
         self.timeout_s = timeout_s
         self.max_display_rows = max_display_rows
