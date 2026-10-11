@@ -215,7 +215,7 @@ class Sandbox:
         """
         row_limit = row_limit or self.max_display_rows
         result = {"ok": True, "columns": None, "rows": [], "truncated": False,
-                  "messages": [], "error": None, "elapsed_ms": 0, "statements": 0}
+                  "messages": [], "error": None, "elapsed_ms": 0, "statements": 0, "total_rows": None}
         if not self.configured:
             result.update(ok=False, error={"message": "PRACTICE_DATABASE_URL is not configured in .env"})
             return result
@@ -301,10 +301,11 @@ class Sandbox:
         if _words(stmt, 1)[0] in _ROW_RETURNING_FIRST_WORDS:
             conn.execute("SAVEPOINT __sandbox_stmt")
             try:
-                with conn.cursor(name=f"c_{uuid.uuid4().hex[:12]}") as cur:
+                cname = f"c_{uuid.uuid4().hex[:12]}"
+                with conn.cursor(name=cname) as cur:
                     cur.execute(stmt)
-                    self._capture(cur, row_limit, result)
-                    status = f"SELECT {len(result['rows'])}{'+' if result['truncated'] else ''}"
+                    self._capture(cur, row_limit, result, conn=conn, cursor_name=cname)
+                    status = f"SELECT {result.get('total_rows') or len(result['rows'])}"
                 conn.execute("RELEASE SAVEPOINT __sandbox_stmt")
                 return status
             except psycopg.errors.FeatureNotSupported:
@@ -319,20 +320,35 @@ class Sandbox:
         with conn.cursor() as cur:
             cur.execute(stmt)
             if cur.description is not None:
-                self._capture(cur, row_limit, result)
+                self._capture(cur, row_limit, result, conn=conn)
             return cur.statusmessage or "OK"
 
     @staticmethod
-    def _capture(cur, row_limit, result):
+    def _capture(cur, row_limit, result, conn=None, cursor_name=None):
         result["columns"] = [d.name for d in cur.description]
         if row_limit and row_limit > 0:
             rows = cur.fetchmany(row_limit + 1)
             result["truncated"] = len(rows) > row_limit
             result["rows"] = [tuple(r) for r in rows[:row_limit]]
+            if result["truncated"]:
+                if cursor_name and conn:
+                    try:
+                        with conn.cursor() as move_cur:
+                            move_cur.execute(f"MOVE FORWARD ALL FROM {cursor_name};")
+                            result["total_rows"] = len(rows) + max(0, move_cur.rowcount)
+                    except Exception:
+                        result["total_rows"] = None
+                elif cur.rowcount is not None and cur.rowcount >= 0:
+                    result["total_rows"] = cur.rowcount
+                else:
+                    result["total_rows"] = None
+            else:
+                result["total_rows"] = len(result["rows"])
         else:
             rows = cur.fetchall()
             result["truncated"] = False
             result["rows"] = [tuple(r) for r in rows]
+            result["total_rows"] = len(result["rows"])
 
     # ------------------------------------------------------------------ grading
 

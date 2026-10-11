@@ -438,12 +438,16 @@ def run_for_grading(sql):
     limit = 500
     if len(rows) > limit:
         rows, truncated = rows[:limit], True
+    total_rows = result.get("total_rows")
+    if total_rows is None:
+        total_rows = len(result["rows"])
     payload = {
         "ok": result["ok"],
         "columns": result["columns"],
         "rows": [[display_value(v) for v in r] for r in rows],
         "truncated": truncated,
         "row_limit": limit,
+        "total_rows": total_rows,
         "messages": result["messages"],
         "error": result["error"],
         "elapsed_ms": result["elapsed_ms"],

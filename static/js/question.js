@@ -133,11 +133,18 @@
     } else {
       const head = `<tr><th class="rownum">#</th>${res.columns.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr>`;
       const body = res.rows.map((r, i) => `<tr><td class="rownum">${i + 1}</td>${r.map(cell).join('')}</tr>`).join('');
-      const note = res.truncated ? `<div class="trunc">Showing first ${res.row_limit} rows.</div>` : '';
+      const totalCount = res.total_rows != null ? res.total_rows : (res.truncated ? `${res.row_limit}+` : res.rows.length);
+      const note = res.truncated
+        ? `<div class="trunc">Showing first ${res.row_limit} of ${Number(totalCount).toLocaleString()} rows.</div>`
+        : '';
       $('result-panel').innerHTML = res.rows.length
         ? `<div class="grid-wrap"><table class="grid"><thead>${head}</thead><tbody>${body}</tbody></table></div>${note}`
         : `<div class="grid-wrap"><table class="grid"><thead>${head}</thead></table></div><div class="placeholder">0 rows returned.</div>`;
-      $('run-meta').textContent = `${res.rows.length}${res.truncated ? '+' : ''} row${res.rows.length === 1 ? '' : 's'} · ${res.elapsed_ms} ms`;
+      if (res.truncated && res.total_rows != null && res.total_rows > res.rows.length) {
+        $('run-meta').textContent = `Showing ${res.rows.length} of ${Number(res.total_rows).toLocaleString()} rows · ${res.elapsed_ms} ms`;
+      } else {
+        $('run-meta').textContent = `${Number(res.rows.length).toLocaleString()}${res.truncated ? '+' : ''} row${res.rows.length === 1 ? '' : 's'} · ${res.elapsed_ms} ms`;
+      }
     }
 
     // Running is only a test - Submit is what marks the question solved.
