@@ -172,7 +172,7 @@ def _grade_value(v):
 # --------------------------------------------------------------------------- sandbox
 
 class Sandbox:
-    def __init__(self, dsn, timeout_s=15, max_display_rows=500, grade_row_limit=5000, pool_max=10):
+    def __init__(self, dsn, timeout_s=15, max_display_rows=0, grade_row_limit=None, pool_max=10):
         self.dsn = dsn
         self.timeout_s = timeout_s
         self.max_display_rows = max_display_rows
@@ -325,9 +325,14 @@ class Sandbox:
     @staticmethod
     def _capture(cur, row_limit, result):
         result["columns"] = [d.name for d in cur.description]
-        rows = cur.fetchmany(row_limit + 1)
-        result["truncated"] = len(rows) > row_limit
-        result["rows"] = [tuple(r) for r in rows[:row_limit]]
+        if row_limit and row_limit > 0:
+            rows = cur.fetchmany(row_limit + 1)
+            result["truncated"] = len(rows) > row_limit
+            result["rows"] = [tuple(r) for r in rows[:row_limit]]
+        else:
+            rows = cur.fetchall()
+            result["truncated"] = False
+            result["rows"] = [tuple(r) for r in rows]
 
     # ------------------------------------------------------------------ grading
 

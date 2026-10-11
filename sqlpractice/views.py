@@ -435,14 +435,14 @@ def run_for_grading(sql):
     sandbox = get_sandbox()
     result = sandbox.run(sql, row_limit=sandbox.grade_row_limit)
     rows, truncated = result["rows"], result["truncated"]
-    if len(rows) > sandbox.max_display_rows:
+    if sandbox.max_display_rows and sandbox.max_display_rows > 0 and len(rows) > sandbox.max_display_rows:
         rows, truncated = rows[:sandbox.max_display_rows], True
     payload = {
         "ok": result["ok"],
         "columns": result["columns"],
         "rows": [[display_value(v) for v in r] for r in rows],
         "truncated": truncated,
-        "row_limit": sandbox.max_display_rows,
+        "row_limit": sandbox.max_display_rows or len(rows),
         "messages": result["messages"],
         "error": result["error"],
         "elapsed_ms": result["elapsed_ms"],
