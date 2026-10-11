@@ -404,18 +404,211 @@ body.dragging { user-select: none; cursor: row-resize; }
 .answer-sql code { background: none; padding: 0; }
 .answer-actions { position: absolute; right: 8px; top: 8px; }
 
-.schema-panel { width: 280px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface); }
-.schema-head { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
-.schema-head input { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
-.schema-tree { flex: 1; overflow: auto; padding: 6px 0; font-size: 12.5px; }
-.schema-tree summary { cursor: pointer; padding: 3px 12px; list-style-position: inside; }
-.sch > summary { font-weight: 700; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .05em; margin-top: 6px; }
-.tbl > summary { padding-left: 22px; font-family: var(--mono); }
-.tbl > summary:hover { background: var(--surface-2); }
-.tbl ul { list-style: none; margin: 0; padding: 0 0 4px 44px; }
-.tbl li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 12px 1px 0; font-family: var(--mono); font-size: 11.5px; }
-.tbl .col { cursor: copy; }
-.tbl .type { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+/* ---------------------------------------------------------------- database tree explorer (pgAdmin 4 style) */
+.schema-panel {
+  width: 320px; min-width: 240px; max-width: 600px; flex: none;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  user-select: none;
+}
+.schema-panel.collapsed {
+  display: none !important;
+}
+.schema-resizer {
+  width: 5px; flex: none; cursor: col-resize;
+  background: transparent; position: relative; z-index: 10;
+  transition: background 0.15s;
+}
+.schema-resizer:hover, body.resizing-schema .schema-resizer {
+  background: var(--primary);
+}
+body.resizing-schema {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.schema-head {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.schema-title-bar {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.db-brand {
+  display: flex; align-items: center; gap: 8px;
+}
+.db-icon { font-size: 16px; }
+.db-info { display: flex; flex-direction: column; line-height: 1.2; }
+.db-name { font-weight: 700; font-size: 13px; color: var(--text); }
+.db-sub { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.schema-actions { display: flex; align-items: center; gap: 4px; }
+.btn-icon {
+  background: none; border: 1px solid transparent; border-radius: 6px;
+  color: var(--muted); cursor: pointer; padding: 4px 6px; font-size: 12px;
+  line-height: 1; transition: all 0.15s;
+}
+.btn-icon:hover {
+  background: var(--surface-2); color: var(--text); border-color: var(--border);
+}
+
+.schema-search-wrap {
+  position: relative; display: flex; align-items: center;
+}
+.schema-search-icon {
+  position: absolute; left: 8px; color: var(--muted); font-size: 11px; pointer-events: none;
+}
+.schema-search-input {
+  width: 100%; font: inherit; font-size: 12px;
+  padding: 6px 26px 6px 26px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text);
+  outline: none; transition: border-color 0.15s;
+}
+.schema-search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.schema-search-clear {
+  position: absolute; right: 6px; background: none; border: none;
+  color: var(--muted); font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+}
+.schema-search-clear:hover { color: var(--text); background: var(--surface-2); }
+
+.schema-search-stats {
+  font-size: 11px; color: var(--primary); font-weight: 600;
+  padding: 0 2px; display: flex; justify-content: space-between; align-items: center;
+}
+
+.schema-tree {
+  flex: 1; overflow-y: auto; overflow-x: auto;
+  padding: 6px 0 20px; font-size: 12px;
+}
+.schema-loading {
+  padding: 24px 16px; text-align: center; color: var(--muted); font-size: 12.5px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+
+/* Tree Nodes Hierarchy */
+.tree-node {
+  list-style: none;
+}
+.tree-node > summary {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 6px;
+  cursor: pointer; border-radius: 4px; margin: 1px 4px;
+  white-space: nowrap; transition: background 0.1s;
+}
+.tree-node > summary:hover {
+  background: var(--surface-2);
+}
+.tree-node > summary::-webkit-details-marker { display: none; }
+.tree-node > summary::before {
+  content: "▸"; display: inline-block; width: 12px; font-size: 10px; color: var(--muted);
+  transition: transform 0.1s ease;
+}
+.tree-node[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tree-node.no-arrow > summary::before {
+  visibility: hidden;
+}
+
+.tree-children {
+  padding-left: 14px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  margin-left: 12px;
+}
+
+.node-icon { font-size: 12px; line-height: 1; flex: none; }
+.node-name {
+  font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis;
+}
+.node-badge {
+  margin-left: auto; font-size: 10px; color: var(--muted); background: var(--surface-2);
+  padding: 1px 5px; border-radius: 10px; font-weight: 600;
+}
+
+/* Specific node styling */
+.tree-root > summary { font-weight: 700; color: var(--text); }
+.tree-schema > summary { font-weight: 600; }
+.tree-folder > summary { color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.tree-subfolder > summary { color: var(--muted); font-size: 11px; font-weight: 500; }
+
+.tree-table > summary, .tree-view > summary {
+  font-family: var(--mono); font-size: 12px;
+}
+.tree-table > summary .node-name {
+  font-weight: 600; color: var(--text);
+}
+.tree-table > summary:hover .node-name, .tree-view > summary:hover .node-name {
+  color: var(--primary);
+}
+
+/* Leaf items: Columns, Constraints, Indexes, Triggers */
+.tree-leaf-list {
+  list-style: none; margin: 0; padding: 2px 0 4px 6px;
+}
+.tree-leaf-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 2px 8px 2px 4px; font-family: var(--mono); font-size: 11.5px;
+  border-radius: 4px; margin: 1px 2px; white-space: nowrap;
+}
+.tree-leaf-item:hover {
+  background: var(--surface-2);
+}
+.leaf-left {
+  display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.leaf-name {
+  cursor: copy; color: var(--text);
+}
+.leaf-name:hover {
+  color: var(--primary); text-decoration: underline;
+}
+
+/* Badges for PK, FK, NN, Unique */
+.badge-pk {
+  background: #fef3c7; color: #b45309; font-size: 9px; font-weight: 700;
+  padding: 0 4px; border-radius: 3px; border: 1px solid #fde68a;
+}
+.badge-nn {
+  color: var(--muted); font-size: 9px; font-weight: 700; opacity: 0.8;
+}
+.leaf-type {
+  color: var(--muted); font-size: 11px; margin-left: auto; text-align: right;
+}
+.badge-con {
+  font-size: 9.5px; padding: 0 4px; border-radius: 3px; font-weight: 600;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+}
+.badge-primary-key { background: color-mix(in srgb, var(--easy) 15%, transparent); color: var(--easy); }
+.badge-foreign-key { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); }
+.badge-unique { background: color-mix(in srgb, var(--medium) 15%, transparent); color: var(--medium); }
+.badge-check { background: color-mix(in srgb, var(--crazy) 15%, transparent); color: var(--crazy); }
+.idx-badge { font-size: 9px; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--medium) 15%, transparent); color: var(--medium); font-weight: 600; }
+
+/* Copy icon button */
+.copy-pill {
+  opacity: 0; background: none; border: none; cursor: pointer; padding: 1px 4px;
+  font-size: 10px; color: var(--muted); border-radius: 3px; transition: opacity 0.15s;
+}
+.tree-leaf-item:hover .copy-pill, .tree-table > summary:hover .copy-pill, .tree-view > summary:hover .copy-pill {
+  opacity: 1;
+}
+.copy-pill:hover { color: var(--primary); background: var(--surface-2); }
+
+/* Search highlights & filtering */
+mark.search-match {
+  background: color-mix(in srgb, var(--primary) 35%, transparent);
+  color: inherit; font-weight: 700; border-radius: 2px; padding: 0 1px;
+}
+.search-hidden {
+  display: none !important;
+}
 
 .spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }

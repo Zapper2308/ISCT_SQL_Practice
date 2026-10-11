@@ -40,19 +40,41 @@
   </section>
 
   <div class="ws-body">
-    <aside class="schema-panel" id="schema-panel" hidden>
+    <aside class="schema-panel" id="schema-panel">
       <div class="schema-head">
-        <strong>Schema</strong>
-        <input type="search" id="schema-filter" placeholder="Filter tables…">
+        <div class="schema-title-bar">
+          <div class="db-brand">
+            <span class="db-icon">🗄️</span>
+            <div class="db-info">
+              <span class="db-name" id="schema-db-name">Database</span>
+              <span class="db-sub">Explorer</span>
+            </div>
+          </div>
+          <div class="schema-actions">
+            <button type="button" class="btn-icon" id="schema-refresh-btn" title="Refresh database tree">🔄</button>
+            <button type="button" class="btn-icon" id="schema-collapse-btn" title="Collapse all">⊟</button>
+            <button type="button" class="btn-icon" id="schema-toggle-btn" title="Hide explorer panel">◀</button>
+          </div>
+        </div>
+        <div class="schema-search-wrap">
+          <span class="schema-search-icon">🔍</span>
+          <input type="search" id="schema-search-input" class="schema-search-input" placeholder="Search tables, columns, indexes…" autocomplete="off">
+          <button type="button" id="schema-search-clear" class="schema-search-clear" title="Clear search" hidden>✕</button>
+        </div>
+        <div id="schema-search-stats" class="schema-search-stats" hidden></div>
       </div>
-      <div class="schema-tree" id="schema-tree"><p class="muted small pad">Loading…</p></div>
+      <div class="schema-tree" id="schema-tree">
+        <div class="schema-loading"><span class="spinner"></span> Loading database explorer…</div>
+      </div>
     </aside>
+
+    <div class="schema-resizer" id="schema-resizer" title="Drag to resize database panel"></div>
 
     <div class="split" id="split">
       <section class="pane editor-pane" id="editor-pane">
         <div class="toolbar">
           <button class="btn btn-primary" id="run-btn" title="Run (Ctrl+Enter)"><span class="play">▶</span> Run <kbd>Ctrl ↵</kbd></button>
-          <button class="btn btn-ghost" id="schema-btn" title="Show tables and columns">Schema</button>
+          <button class="btn btn-ghost active" id="schema-btn" title="Toggle Database Tree">🗄️ Database Tree</button>
           <span class="toolbar-spacer"></span>
           <span class="save-state muted small" id="save-state"></span>
           {% if can_reveal %}<button class="btn btn-ghost" id="answer-btn">Show answer</button>{% endif %}

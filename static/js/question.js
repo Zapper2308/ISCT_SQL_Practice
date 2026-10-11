@@ -272,49 +272,411 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
   }
 
-  // ------------------------------------------------------------------ schema browser
-  let schemaLoaded = false;
-  $('schema-btn').addEventListener('click', () => {
-    const panel = $('schema-panel');
-    panel.hidden = !panel.hidden;
-    $('schema-btn').classList.toggle('active', !panel.hidden);
-    editor.refresh();
-    if (!panel.hidden && !schemaLoaded) loadSchema();
-  });
+  // ------------------------------------------------------------------ database tree explorer (pgAdmin 4 style)
+  const schemaPanel = $('schema-panel');
+  const schemaResizer = $('schema-resizer');
+  const schemaTree = $('schema-tree');
+  const schemaSearchInput = $('schema-search-input');
+  const schemaSearchClear = $('schema-search-clear');
+  const schemaSearchStats = $('schema-search-stats');
+  const schemaDbName = $('schema-db-name');
+  const schemaToggleBtn = $('schema-toggle-btn');
+  const schemaBtn = $('schema-btn');
+  const schemaRefreshBtn = $('schema-refresh-btn');
+  const schemaCollapseBtn = $('schema-collapse-btn');
 
-  function loadSchema() {
-    schemaLoaded = true;
-    fetch(data.urls.schema).then(r => r.json()).then(tree => {
-      if (tree.error) {
-        $('schema-tree').innerHTML = `<p class="muted small pad">${escapeHtml(tree.error)}</p>`;
-        schemaLoaded = false;
-        return;
-      }
-      const hintTables = {};
-      const html = Object.keys(tree).sort().map(schema => {
-        const tables = Object.keys(tree[schema]).sort().map(t => {
-          hintTables[`${schema}.${t}`] = tree[schema][t].map(c => c[0]);
-          const cols = tree[schema][t].map(([c, ty]) => `<li><span class="col">${escapeHtml(c)}</span><span class="type">${escapeHtml(ty)}</span></li>`).join('');
-          return `<details class="tbl" data-name="${escapeHtml((schema + '.' + t).toLowerCase())}"><summary><span class="tbl-name" data-insert="${escapeHtml(schema + '.' + t)}">${escapeHtml(t)}</span></summary><ul>${cols}</ul></details>`;
-        }).join('');
-        return `<details class="sch" open><summary>${escapeHtml(schema)}</summary>${tables}</details>`;
-      }).join('');
-      $('schema-tree').innerHTML = html || '<p class="muted small pad">No tables found.</p>';
-      editor.setOption('hintOptions', {completeSingle: false, tables: hintTables});
-    }).catch(() => { schemaLoaded = false; });
+  let rawSchemaData = null;
+  let schemaLoaded = false;
+
+  // Restore panel width and state from localStorage
+  try {
+    const savedWidth = localStorage.getItem('schema-panel-width');
+    if (savedWidth && schemaPanel) schemaPanel.style.width = savedWidth;
+    const isCollapsed = localStorage.getItem('schema-panel-collapsed') === 'true';
+    if (isCollapsed && schemaPanel) {
+      schemaPanel.classList.add('collapsed');
+      if (schemaBtn) schemaBtn.classList.remove('active');
+    }
+  } catch (e) {}
+
+  // Toggle button handlers
+  const togglePanel = (forceState) => {
+    if (!schemaPanel) return;
+    const shouldCollapse = forceState !== undefined ? !forceState : !schemaPanel.classList.contains('collapsed');
+    schemaPanel.classList.toggle('collapsed', shouldCollapse);
+    if (schemaBtn) schemaBtn.classList.toggle('active', !shouldCollapse);
+    try { localStorage.setItem('schema-panel-collapsed', shouldCollapse); } catch (e) {}
+    editor.refresh();
+  };
+
+  if (schemaBtn) schemaBtn.addEventListener('click', () => togglePanel());
+  if (schemaToggleBtn) schemaToggleBtn.addEventListener('click', () => togglePanel(false));
+
+  // Resizer for Database Explorer panel
+  if (schemaResizer && schemaPanel) {
+    schemaResizer.addEventListener('pointerdown', (e) => {
+      schemaResizer.setPointerCapture(e.pointerId);
+      document.body.classList.add('resizing-schema');
+      const startX = e.clientX;
+      const startWidth = schemaPanel.getBoundingClientRect().width;
+
+      const onPointerMove = (ev) => {
+        const newWidth = Math.min(650, Math.max(220, startWidth + (ev.clientX - startX)));
+        schemaPanel.style.width = `${newWidth}px`;
+        editor.refresh();
+      };
+
+      const onPointerUp = (ev) => {
+        schemaResizer.releasePointerCapture(ev.pointerId);
+        document.body.classList.remove('resizing-schema');
+        schemaResizer.removeEventListener('pointermove', onPointerMove);
+        schemaResizer.removeEventListener('pointerup', onPointerUp);
+        try { localStorage.setItem('schema-panel-width', schemaPanel.style.width); } catch (e) {}
+        editor.refresh();
+      };
+
+      schemaResizer.addEventListener('pointermove', onPointerMove);
+      schemaResizer.addEventListener('pointerup', onPointerUp);
+    });
   }
 
-  $('schema-tree').addEventListener('dblclick', (e) => {
-    const target = e.target.closest('[data-insert], .col');
+  // Load Schema
+  function loadSchema(forceRefresh = false) {
+    if (forceRefresh) {
+      schemaTree.innerHTML = '<div class="schema-loading"><span class="spinner"></span> Refreshing database explorer…</div>';
+    }
+    const url = forceRefresh ? `${data.urls.schema}?refresh=1` : data.urls.schema;
+    fetch(url)
+      .then(r => r.json())
+      .then(tree => {
+        if (tree.error) {
+          schemaTree.innerHTML = `<p class="muted small pad" style="padding: 16px;">${escapeHtml(tree.error)}</p>`;
+          return;
+        }
+        rawSchemaData = tree;
+        schemaLoaded = true;
+        renderDatabaseTree(tree);
+      })
+      .catch(err => {
+        schemaTree.innerHTML = `<p class="muted small pad" style="padding: 16px;">Could not connect to database explorer.</p>`;
+      });
+  }
+
+  // Render Full pgAdmin 4 Style Tree
+  function renderDatabaseTree(tree) {
+    const dbName = tree.database || 'Database';
+    if (schemaDbName) schemaDbName.textContent = dbName;
+
+    const schemas = tree.schemas || {};
+    const schemaNames = Object.keys(schemas).sort();
+
+    const hintTables = {};
+
+    let html = '';
+    html += `<details class="tree-node tree-root" open>`;
+    html += `<summary><span class="node-icon">🗄️</span> <span class="node-name searchable-text" data-text="${escapeHtml(dbName)}">${escapeHtml(dbName)}</span> <span class="node-badge">${schemaNames.length} schemas</span></summary>`;
+    html += `<div class="tree-children">`;
+
+    schemaNames.forEach(schName => {
+      const sch = schemas[schName];
+      const tableNames = Object.keys(sch.tables || {}).sort();
+      const viewNames = Object.keys(sch.views || {}).sort();
+      const totalRels = tableNames.length + viewNames.length;
+
+      html += `<details class="tree-node tree-schema" data-search-container open>`;
+      html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="${escapeHtml(schName)}">${escapeHtml(schName)}</span> <span class="node-badge">${totalRels}</span></summary>`;
+      html += `<div class="tree-children">`;
+
+      // Tables Folder
+      if (tableNames.length > 0) {
+        html += `<details class="tree-node tree-folder" data-search-container open>`;
+        html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Tables">Tables</span> <span class="node-badge">${tableNames.length}</span></summary>`;
+        html += `<div class="tree-children">`;
+
+        tableNames.forEach(tblName => {
+          const tbl = sch.tables[tblName];
+          const cols = tbl.columns || [];
+          const cons = tbl.constraints || [];
+          const idxs = tbl.indexes || [];
+          const rules = tbl.rules || [];
+          const trigs = tbl.triggers || [];
+
+          // Autocomplete hints
+          hintTables[`${schName}.${tblName}`] = cols.map(c => c.name);
+
+          html += `<details class="tree-node tree-table" data-search-container data-insert="${escapeHtml(schName + '.' + tblName)}">`;
+          html += `<summary>
+            <span class="node-icon">📄</span>
+            <span class="node-name searchable-text" data-text="${escapeHtml(tblName)}" data-insert="${escapeHtml(schName + '.' + tblName)}" title="Double-click to insert table">${escapeHtml(tblName)}</span>
+            <button type="button" class="copy-pill" data-copy="${escapeHtml(schName + '.' + tblName)}" title="Copy full table name">📋</button>
+          </summary>`;
+          html += `<div class="tree-children">`;
+
+          // Columns
+          html += `<details class="tree-node tree-subfolder" data-search-container open>`;
+          html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Columns">Columns</span> <span class="node-badge">${cols.length}</span></summary>`;
+          html += `<ul class="tree-leaf-list">`;
+          cols.forEach(col => {
+            html += `<li class="tree-leaf-item" data-search-item data-insert="${escapeHtml(col.name)}" title="${escapeHtml(col.name)}: ${escapeHtml(col.type)}">
+              <div class="leaf-left">
+                <span class="leaf-icon">${col.is_pk ? '🔑' : '🔹'}</span>
+                <span class="leaf-name searchable-text" data-text="${escapeHtml(col.name)}" data-insert="${escapeHtml(col.name)}" title="Double-click to insert">${escapeHtml(col.name)}</span>
+                ${col.is_pk ? '<span class="badge-pk" title="Primary Key">PK</span>' : ''}
+                ${!col.nullable ? '<span class="badge-nn" title="Not Null">NN</span>' : ''}
+                <button type="button" class="copy-pill" data-copy="${escapeHtml(col.name)}" title="Copy column name">📋</button>
+              </div>
+              <span class="leaf-type searchable-text" data-text="${escapeHtml(col.type)}">${escapeHtml(col.type)}</span>
+            </li>`;
+          });
+          html += `</ul></details>`;
+
+          // Constraints
+          if (cons.length > 0) {
+            html += `<details class="tree-node tree-subfolder" data-search-container>`;
+            html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Constraints">Constraints</span> <span class="node-badge">${cons.length}</span></summary>`;
+            html += `<ul class="tree-leaf-list">`;
+            cons.forEach(con => {
+              const conClass = 'badge-' + (con.type || '').toLowerCase().replace(/\s+/g, '-');
+              html += `<li class="tree-leaf-item" data-search-item title="${escapeHtml(con.definition || '')}">
+                <div class="leaf-left">
+                  <span class="leaf-icon">🔒</span>
+                  <span class="leaf-name searchable-text" data-text="${escapeHtml(con.name)}">${escapeHtml(con.name)}</span>
+                </div>
+                <span class="badge-con ${conClass} searchable-text" data-text="${escapeHtml(con.type)}">${escapeHtml(con.type)}</span>
+              </li>`;
+            });
+            html += `</ul></details>`;
+          }
+
+          // Indexes
+          if (idxs.length > 0) {
+            html += `<details class="tree-node tree-subfolder" data-search-container>`;
+            html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Indexes">Indexes</span> <span class="node-badge">${idxs.length}</span></summary>`;
+            html += `<ul class="tree-leaf-list">`;
+            idxs.forEach(idx => {
+              html += `<li class="tree-leaf-item" data-search-item title="${escapeHtml(idx.definition || '')}">
+                <div class="leaf-left">
+                  <span class="leaf-icon">⚡</span>
+                  <span class="leaf-name searchable-text" data-text="${escapeHtml(idx.name)}">${escapeHtml(idx.name)}</span>
+                  ${idx.is_unique ? '<span class="idx-badge">UNIQUE</span>' : ''}
+                </div>
+              </li>`;
+            });
+            html += `</ul></details>`;
+          }
+
+          // Rules
+          if (rules.length > 0) {
+            html += `<details class="tree-node tree-subfolder" data-search-container>`;
+            html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Rules">Rules</span> <span class="node-badge">${rules.length}</span></summary>`;
+            html += `<ul class="tree-leaf-list">`;
+            rules.forEach(r => {
+              html += `<li class="tree-leaf-item" data-search-item title="${escapeHtml(r.definition || '')}">
+                <div class="leaf-left">
+                  <span class="leaf-icon">⚙️</span>
+                  <span class="leaf-name searchable-text" data-text="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+                </div>
+              </li>`;
+            });
+            html += `</ul></details>`;
+          }
+
+          // Triggers
+          if (trigs.length > 0) {
+            html += `<details class="tree-node tree-subfolder" data-search-container>`;
+            html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Triggers">Triggers</span> <span class="node-badge">${trigs.length}</span></summary>`;
+            html += `<ul class="tree-leaf-list">`;
+            trigs.forEach(tg => {
+              html += `<li class="tree-leaf-item" data-search-item title="${escapeHtml(tg.definition || '')}">
+                <div class="leaf-left">
+                  <span class="leaf-icon">⚡</span>
+                  <span class="leaf-name searchable-text" data-text="${escapeHtml(tg.name)}">${escapeHtml(tg.name)}</span>
+                </div>
+              </li>`;
+            });
+            html += `</ul></details>`;
+          }
+
+          html += `</div></details>`; // End table
+        });
+        html += `</div></details>`; // End tables folder
+      }
+
+      // Views Folder
+      if (viewNames.length > 0) {
+        html += `<details class="tree-node tree-folder" data-search-container open>`;
+        html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Views">Views</span> <span class="node-badge">${viewNames.length}</span></summary>`;
+        html += `<div class="tree-children">`;
+
+        viewNames.forEach(viewName => {
+          const vw = sch.views[viewName];
+          const cols = vw.columns || [];
+
+          hintTables[`${schName}.${viewName}`] = cols.map(c => c.name);
+
+          html += `<details class="tree-node tree-view" data-search-container data-insert="${escapeHtml(schName + '.' + viewName)}">`;
+          html += `<summary>
+            <span class="node-icon">👁️</span>
+            <span class="node-name searchable-text" data-text="${escapeHtml(viewName)}" data-insert="${escapeHtml(schName + '.' + viewName)}" title="Double-click to insert view">${escapeHtml(viewName)}</span>
+            <button type="button" class="copy-pill" data-copy="${escapeHtml(schName + '.' + viewName)}" title="Copy full view name">📋</button>
+          </summary>`;
+          html += `<div class="tree-children">`;
+
+          // Columns
+          html += `<details class="tree-node tree-subfolder" data-search-container open>`;
+          html += `<summary><span class="node-icon">📁</span> <span class="node-name searchable-text" data-text="Columns">Columns</span> <span class="node-badge">${cols.length}</span></summary>`;
+          html += `<ul class="tree-leaf-list">`;
+          cols.forEach(col => {
+            html += `<li class="tree-leaf-item" data-search-item data-insert="${escapeHtml(col.name)}" title="${escapeHtml(col.name)}: ${escapeHtml(col.type)}">
+              <div class="leaf-left">
+                <span class="leaf-icon">🔹</span>
+                <span class="leaf-name searchable-text" data-text="${escapeHtml(col.name)}" data-insert="${escapeHtml(col.name)}" title="Double-click to insert">${escapeHtml(col.name)}</span>
+              </div>
+              <span class="leaf-type searchable-text" data-text="${escapeHtml(col.type)}">${escapeHtml(col.type)}</span>
+            </li>`;
+          });
+          html += `</ul></details>`;
+
+          html += `</div></details>`; // End view
+        });
+        html += `</div></details>`; // End views folder
+      }
+
+      html += `</div></details>`; // End schema
+    });
+
+    html += `</div></details>`; // End database root
+
+    schemaTree.innerHTML = html;
+    editor.setOption('hintOptions', {completeSingle: false, tables: hintTables});
+  }
+
+  // pgAdmin 4 Style Search Engine
+  function performSearch(query) {
+    const q = query.trim().toLowerCase();
+    const searchables = schemaTree.querySelectorAll('.searchable-text');
+
+    if (!q) {
+      if (schemaSearchClear) schemaSearchClear.hidden = true;
+      if (schemaSearchStats) schemaSearchStats.hidden = true;
+      searchables.forEach(el => {
+        el.innerHTML = escapeHtml(el.dataset.text || el.textContent);
+      });
+      schemaTree.querySelectorAll('.search-hidden').forEach(el => el.classList.remove('search-hidden'));
+      return;
+    }
+
+    if (schemaSearchClear) schemaSearchClear.hidden = false;
+    if (schemaSearchStats) schemaSearchStats.hidden = false;
+
+    let matchCount = 0;
+    const matchedContainers = new Set();
+
+    searchables.forEach(el => {
+      const text = el.dataset.text || el.textContent;
+      const lower = text.toLowerCase();
+      const idx = lower.indexOf(q);
+
+      if (idx !== -1) {
+        matchCount++;
+        // Highlight matching text
+        const before = escapeHtml(text.slice(0, idx));
+        const match = escapeHtml(text.slice(idx, idx + q.length));
+        const after = escapeHtml(text.slice(idx + q.length));
+        el.innerHTML = `${before}<mark class="search-match">${match}</mark>${after}`;
+
+        // Mark all parent containers as matched
+        let parent = el.closest('[data-search-container], .tree-node, [data-search-item]');
+        while (parent && parent !== schemaTree) {
+          matchedContainers.add(parent);
+          if (parent.tagName === 'DETAILS') {
+            parent.open = true;
+          }
+          parent = parent.parentElement ? parent.parentElement.closest('[data-search-container], .tree-node') : null;
+        }
+      } else {
+        el.innerHTML = escapeHtml(text);
+      }
+    });
+
+    // Update stats counter
+    if (schemaSearchStats) {
+      schemaSearchStats.textContent = matchCount === 0
+        ? 'No matches found'
+        : `${matchCount} match${matchCount === 1 ? '' : 'es'} found`;
+    }
+
+    // Hide non-matching items and containers
+    const allContainers = schemaTree.querySelectorAll('[data-search-container], [data-search-item]');
+    allContainers.forEach(el => {
+      if (matchedContainers.has(el)) {
+        el.classList.remove('search-hidden');
+      } else {
+        el.classList.add('search-hidden');
+      }
+    });
+  }
+
+  // Search input listeners
+  if (schemaSearchInput) {
+    schemaSearchInput.addEventListener('input', (e) => {
+      performSearch(e.target.value);
+    });
+    schemaSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        schemaSearchInput.value = '';
+        performSearch('');
+        schemaSearchInput.blur();
+      }
+    });
+  }
+
+  if (schemaSearchClear) {
+    schemaSearchClear.addEventListener('click', () => {
+      if (schemaSearchInput) {
+        schemaSearchInput.value = '';
+        performSearch('');
+        schemaSearchInput.focus();
+      }
+    });
+  }
+
+  // Refresh and Collapse All Buttons
+  if (schemaRefreshBtn) {
+    schemaRefreshBtn.addEventListener('click', () => loadSchema(true));
+  }
+  if (schemaCollapseBtn) {
+    schemaCollapseBtn.addEventListener('click', () => {
+      schemaTree.querySelectorAll('.tree-node').forEach(node => {
+        if (!node.classList.contains('tree-root')) node.open = false;
+      });
+    });
+  }
+
+  // Double click and Copy button delegation
+  schemaTree.addEventListener('dblclick', (e) => {
+    const target = e.target.closest('[data-insert]');
     if (!target) return;
     editor.replaceSelection(target.dataset.insert || target.textContent);
     editor.focus();
   });
 
-  $('schema-filter').addEventListener('input', (e) => {
-    const f = e.target.value.trim().toLowerCase();
-    document.querySelectorAll('#schema-tree .tbl').forEach(t => { t.hidden = f && !t.dataset.name.includes(f); });
+  schemaTree.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.copy-pill');
+    if (!copyBtn) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const text = copyBtn.dataset.copy;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = '✓';
+      setTimeout(() => { copyBtn.textContent = orig; }, 1200);
+    });
   });
+
+  // Initial load
+  loadSchema();
 
   // ------------------------------------------------------------------ draggable splitter
   const split = $('split');

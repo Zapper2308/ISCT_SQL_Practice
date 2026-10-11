@@ -382,21 +382,194 @@ class Sandbox:
 
     # ------------------------------------------------------------------ schema browser
 
-    def schema(self, exclude):
+    def schema(self, exclude=None, refresh=False):
         ts, cached = self._schema_cache
-        if cached is not None and time.time() - ts < 600:
+        if not refresh and cached is not None and time.time() - ts < 600:
             return cached
-        res = self.run(
-            "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns "
-            "ORDER BY table_schema, table_name, ordinal_position",
-            row_limit=50000,
-        )
-        if not res["ok"]:
-            return {"error": res["error"]["message"]}
-        tree = {}
-        for schema, table, col, dtype in res["rows"]:
-            if schema in exclude or schema.startswith("pg_"):
-                continue
-            tree.setdefault(schema, {}).setdefault(table, []).append([col, dtype])
-        self._schema_cache = (time.time(), tree)
-        return tree
+        if not self.configured:
+            return {"error": "PRACTICE_DATABASE_URL is not configured in .env"}
+
+        exclude_list = list(exclude or [])
+        try:
+            with self._get_pool().connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT current_database();")
+                    db_name = cur.fetchone()[0]
+
+                    cur.execute("""
+                        SELECT n.nspname AS schema_name,
+                               c.relname AS rel_name,
+                               CASE c.relkind 
+                                 WHEN 'r' THEN 'table' 
+                                 WHEN 'p' THEN 'table' 
+                                 WHEN 'v' THEN 'view' 
+                                 WHEN 'm' THEN 'view' 
+                                 ELSE 'table'
+                               END AS rel_type
+                        FROM pg_class c
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE LEFT(n.nspname, 3) != 'pg_' 
+                          AND NOT (n.nspname = ANY(%s))
+                          AND c.relkind IN ('r', 'p', 'v', 'm')
+                        ORDER BY n.nspname, c.relname;
+                    """, (exclude_list,))
+                    relations = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT 
+                            c.table_schema,
+                            c.table_name,
+                            c.column_name,
+                            CASE 
+                                WHEN c.data_type = 'character varying' THEN 
+                                    CASE WHEN c.character_maximum_length IS NOT NULL 
+                                         THEN 'varchar(' || c.character_maximum_length || ')' 
+                                         ELSE 'varchar' END
+                                WHEN c.data_type = 'character' THEN 'char(' || c.character_maximum_length || ')'
+                                WHEN c.data_type = 'numeric' THEN 
+                                    CASE WHEN c.numeric_precision IS NOT NULL 
+                                         THEN 'numeric(' || c.numeric_precision || COALESCE(',' || c.numeric_scale, '') || ')'
+                                         ELSE 'numeric' END
+                                ELSE c.udt_name
+                            END AS formatted_type,
+                            c.is_nullable = 'YES' AS is_nullable,
+                            c.column_default,
+                            CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END AS is_pk
+                        FROM information_schema.columns c
+                        LEFT JOIN (
+                            SELECT ku.table_schema, ku.table_name, ku.column_name
+                            FROM information_schema.table_constraints tc
+                            JOIN information_schema.key_column_usage ku
+                              ON tc.constraint_name = ku.constraint_name
+                              AND tc.table_schema = ku.table_schema
+                            WHERE tc.constraint_type = 'PRIMARY KEY'
+                        ) pk ON c.table_schema = pk.table_schema 
+                            AND c.table_name = pk.table_name 
+                            AND c.column_name = pk.column_name
+                        WHERE LEFT(c.table_schema, 3) != 'pg_'
+                          AND NOT (c.table_schema = ANY(%s))
+                        ORDER BY c.table_schema, c.table_name, c.ordinal_position;
+                    """, (exclude_list,))
+                    cols = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT 
+                            n.nspname AS schema_name,
+                            c.relname AS table_name,
+                            con.conname AS constraint_name,
+                            CASE con.contype
+                                WHEN 'p' THEN 'PRIMARY KEY'
+                                WHEN 'f' THEN 'FOREIGN KEY'
+                                WHEN 'u' THEN 'UNIQUE'
+                                WHEN 'c' THEN 'CHECK'
+                                WHEN 'x' THEN 'EXCLUSION'
+                                ELSE con.contype::text
+                            END AS constraint_type,
+                            pg_get_constraintdef(con.oid, true) AS definition
+                        FROM pg_constraint con
+                        JOIN pg_class c ON c.oid = con.conrelid
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE LEFT(n.nspname, 3) != 'pg_'
+                          AND NOT (n.nspname = ANY(%s))
+                        ORDER BY n.nspname, c.relname, con.conname;
+                    """, (exclude_list,))
+                    constraints = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT 
+                            n.nspname AS schema_name,
+                            t.relname AS table_name,
+                            i.relname AS index_name,
+                            ix.indisunique AS is_unique,
+                            ix.indisprimary AS is_primary,
+                            pg_get_indexdef(ix.indexrelid, 0, true) AS definition
+                        FROM pg_index ix
+                        JOIN pg_class t ON t.oid = ix.indrelid
+                        JOIN pg_class i ON i.oid = ix.indexrelid
+                        JOIN pg_namespace n ON n.oid = t.relnamespace
+                        WHERE LEFT(n.nspname, 3) != 'pg_'
+                          AND NOT (n.nspname = ANY(%s))
+                        ORDER BY n.nspname, t.relname, i.relname;
+                    """, (exclude_list,))
+                    indexes = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT 
+                            schemaname AS schema_name,
+                            tablename AS table_name,
+                            rulename AS rule_name,
+                            definition
+                        FROM pg_rules
+                        WHERE LEFT(schemaname, 3) != 'pg_'
+                          AND NOT (schemaname = ANY(%s))
+                        ORDER BY schemaname, tablename, rulename;
+                    """, (exclude_list,))
+                    rules = cur.fetchall()
+
+                    cur.execute("""
+                        SELECT 
+                            n.nspname AS schema_name,
+                            c.relname AS table_name,
+                            t.tgname AS trigger_name,
+                            pg_get_triggerdef(t.oid, true) AS definition,
+                            t.tgenabled AS enabled
+                        FROM pg_trigger t
+                        JOIN pg_class c ON c.oid = t.tgrelid
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE NOT t.tgisinternal
+                          AND LEFT(n.nspname, 3) != 'pg_'
+                          AND NOT (n.nspname = ANY(%s))
+                        ORDER BY n.nspname, c.relname, t.tgname;
+                    """, (exclude_list,))
+                    triggers = cur.fetchall()
+
+            tree = {
+                "database": db_name,
+                "schemas": {}
+            }
+
+            cols_map = {}
+            for s, t, col, ty, null, default, pk in cols:
+                cols_map.setdefault((s, t), []).append({
+                    "name": col, "type": ty, "nullable": null, "default": default, "is_pk": pk
+                })
+
+            cons_map = {}
+            for s, t, cname, ctype, cdef in constraints:
+                cons_map.setdefault((s, t), []).append({
+                    "name": cname, "type": ctype, "definition": cdef
+                })
+
+            idx_map = {}
+            for s, t, iname, uniq, prim, idef in indexes:
+                idx_map.setdefault((s, t), []).append({
+                    "name": iname, "is_unique": uniq, "is_primary": prim, "definition": idef
+                })
+
+            rule_map = {}
+            for s, t, rname, rdef in rules:
+                rule_map.setdefault((s, t), []).append({
+                    "name": rname, "definition": rdef
+                })
+
+            trig_map = {}
+            for s, t, tgname, tgdef, tgen in triggers:
+                trig_map.setdefault((s, t), []).append({
+                    "name": tgname, "definition": tgdef, "enabled": tgen
+                })
+
+            for s, rel, rtype in relations:
+                schema_node = tree["schemas"].setdefault(s, {"tables": {}, "views": {}})
+                target = schema_node["views"] if rtype == "view" else schema_node["tables"]
+                target[rel] = {
+                    "columns": cols_map.get((s, rel), []),
+                    "constraints": cons_map.get((s, rel), []),
+                    "indexes": idx_map.get((s, rel), []),
+                    "rules": rule_map.get((s, rel), []),
+                    "triggers": trig_map.get((s, rel), []),
+                }
+
+            self._schema_cache = (time.time(), tree)
+            return tree
+        except Exception as e:
+            return {"error": f"Could not load schema: {e}"}

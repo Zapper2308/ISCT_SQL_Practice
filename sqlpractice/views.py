@@ -557,7 +557,8 @@ def api_answer(request, qid):
 @require_GET
 @login_required
 def api_schema(request):
-    return JsonResponse(get_sandbox().schema(settings.SCHEMA_EXCLUDE), safe=False)
+    refresh = request.GET.get("refresh") in ("1", "true")
+    return JsonResponse(get_sandbox().schema(settings.SCHEMA_EXCLUDE, refresh=refresh), safe=False)
 
 
 # ----------------------------------------------------------------- errors
