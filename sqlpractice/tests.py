@@ -217,3 +217,12 @@ class RetailMartTestCase(TestCase):
             self.assertFalse(res["correct"])
             self.assertEqual(res["feedback"], "Incorrect logic")
             mock_gemini.assert_called_once()
+
+    def test_indian_timezone_formatting(self):
+        from datetime import datetime, timezone as dt_timezone
+        from django.conf import settings
+        from sqlpractice.templatetags.sqlpractice_tags import localdt
+
+        self.assertEqual(settings.TIME_ZONE, "Asia/Kolkata")
+        utc_dt = datetime(2026, 10, 23, 10, 0, 0, tzinfo=dt_timezone.utc)
+        self.assertEqual(localdt(utc_dt), "23 Oct 2026, 15:30")

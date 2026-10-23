@@ -31,3 +31,7 @@ media/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Windows desktop application (Tauri / sidecar)
+desktop/
+retailmart_API_KEYS.txt

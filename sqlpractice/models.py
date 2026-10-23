@@ -94,4 +94,4 @@ class PasswordResetRequest(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Reset request for {self.user_id} at {self.created_at:%Y-%m-%d %H:%M}"
+        return f"Reset request for {self.user_id} at {timezone.localtime(self.created_at):%Y-%m-%d %H:%M}"

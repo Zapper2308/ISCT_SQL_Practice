@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <title>{% block title %}SQL Practice{% endblock %} · SQL Query Practice</title>
+  <title>{% block title %}SQL Practice{% endblock %} · ISCT SQL Practice</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" href="{% asset 'images/app_icon.png' %}">
+  <link rel="apple-touch-icon" href="{% asset 'images/app_icon.png' %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% asset 'css/style.css' %}">
@@ -50,7 +53,7 @@
   <header class="topbar">
     <a class="brand" href="{% if user.is_admin %}{% url 'admin_home' %}{% else %}{% url 'dashboard' %}{% endif %}">
       <img src="{% asset 'images/isct_logo.png' %}" alt="ISCT Logo" class="brand-logo">
-      <span class="brand-name">SQL Query Practice</span>
+      <span class="brand-name">ISCT SQL Practice</span>
     </a>
     <nav class="nav">
       {% if user.is_admin %}

@@ -413,7 +413,7 @@ def admin_dismiss_reset(request, request_id):
 @require_GET
 @admin_required
 def admin_export(request):
-    filename = f"student_results_{timezone.now():%Y%m%d}.csv"
+    filename = f"student_results_{timezone.localtime():%Y%m%d}.csv"
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f"attachment; filename={filename}"
     writer = csv.writer(response)
@@ -421,8 +421,8 @@ def admin_export(request):
                      *[f"{d}_solved" for d in DIFFICULTIES], "in_progress", "queries_run", "answers_revealed"])
     for s in student_overview():
         u = s["user"]
-        writer.writerow([u.name, u.email, u.created_at.strftime("%Y-%m-%d"),
-                         s["last_active"].strftime("%Y-%m-%d %H:%M") if s["last_active"] else "",
+        writer.writerow([u.name, u.email, timezone.localtime(u.created_at).strftime("%Y-%m-%d"),
+                         timezone.localtime(s["last_active"]).strftime("%Y-%m-%d %H:%M") if s["last_active"] else "",
                          s["solved"], s["auto"], s["ai"], s["self_marked"],
                          *[s["by_diff"][d] for d in DIFFICULTIES], s["attempted"], s["runs"], s["revealed"]])
     return response

@@ -4,13 +4,25 @@ Everything configurable lives in `.env` (see README.md); this file only maps tho
 """
 import os
 import secrets
+import sys
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+# When packaged by PyInstaller (the Windows desktop app) the read-only resources (templates, static,
+# Practice/) live in the bundle directory, and nothing is read from a `.env` file: the desktop shell
+# hands the (DPAPI-encrypted at rest) settings to this process as environment variables instead.
+FROZEN = bool(getattr(sys, "frozen", False))
+
+if FROZEN:
+    BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    DATA_DIR = Path(os.environ.get("RETAILMART_DATA_DIR") or Path(os.environ.get("APPDATA", Path.home())) / "RetailMart")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    DATA_DIR = BASE_DIR
+    load_dotenv(BASE_DIR / ".env")
 
 
 def env(name, default=""):
@@ -34,7 +46,7 @@ def database_from_url(url):
         path = url.split(":///", 1)[1] if ":///" in url else "retailmart.sqlite3"
         path = Path(path)
         if not path.is_absolute():
-            path = BASE_DIR / "instance" / path
+            path = DATA_DIR / "instance" / path
         path.parent.mkdir(parents=True, exist_ok=True)
         return {"ENGINE": "django.db.backends.sqlite3", "NAME": str(path)}
 
@@ -134,7 +146,7 @@ CSRF_FAILURE_VIEW = "sqlpractice.views.csrf_failure"
 # ----------------------------------------------------------------- i18n / time
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"      # stored as UTC; templates show times in the server's local timezone
+TIME_ZONE = "Asia/Kolkata"  # Indian Standard Time (IST, UTC+05:30)
 USE_I18N = False
 USE_TZ = True
 

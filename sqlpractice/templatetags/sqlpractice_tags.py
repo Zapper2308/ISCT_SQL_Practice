@@ -4,6 +4,7 @@ from datetime import timezone as dt_timezone
 from django import template
 from django.contrib.staticfiles import finders
 from django.templatetags.static import static
+from django.utils import timezone
 
 register = template.Library()
 
@@ -20,12 +21,12 @@ def asset(path):
 
 @register.filter
 def localdt(dt, fmt="%d %b %Y, %H:%M"):
-    """Show a (UTC) timestamp in the server's local timezone, like the Flask app did."""
+    """Show a (UTC) timestamp in Indian Standard Time (settings.TIME_ZONE = Asia/Kolkata)."""
     if not dt:
         return ""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=dt_timezone.utc)
-    return dt.astimezone().strftime(fmt)
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, dt_timezone.utc)
+    return timezone.localtime(dt).strftime(fmt)
 
 
 @register.filter
